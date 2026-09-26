@@ -2,8 +2,7 @@
 
 int main() {
     int n;
-
-    printf("Enter n: ");
+    printf("Enter the value of n: ");
     scanf("%d", &n);
 
     for (int i = 1; i <= n; i += 2)
