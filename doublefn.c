@@ -1,0 +1,18 @@
+#include <stdio.h>
+
+void twice(int);
+
+int main(void) {
+    int x = 10;
+    printf("x in main: %d\n", x);
+
+    twice(x);
+
+    printf("x in main: %d\n", x);
+    return 0;
+}
+
+void twice(int x) {
+    x = x * 2;
+    printf("x in function: %d\n", x);
+}
