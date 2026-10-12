@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Explore all 1,025 Pokémon with Deep Datta Chaudhury’s unofficial Pokédex: search every generation, browse Pokémon details, and try photo lookup with a manual search fallback."
+      content="Explore all 1,025 Pokémon with Deep Datta Chaudhury’s unofficial Pokédex: search every generation, browse detailed entries, and scan with a live camera preview."
     />
     <meta name="author" content="Deep Datta Chaudhury" />
     <meta name="robots" content="index,follow,max-image-preview:large" />
@@ -16,21 +16,22 @@
     <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="Pokédex Field Guide" />
     <meta property="og:title" content="Pokédex Field Guide — by Deep Datta Chaudhury" />
-    <meta property="og:description" content="An unofficial, all-generations Pokémon field guide by Deep Datta Chaudhury. Browse Pokémon details, types, evolutions, and more." />
+    <meta property="og:description" content="An unofficial, all-generations Pokémon field guide by Deep Datta Chaudhury. Browse Pokémon details or try live camera scan with manual search fallback." />
     <meta property="og:url" content="https://kaleidoscopic-custard-2a6567.netlify.app/" />
     <meta property="og:image" content="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png" />
     <meta property="og:image:alt" content="Pikachu official artwork, served by the PokéAPI sprites project" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Pokédex Field Guide — by Deep Datta Chaudhury" />
-    <meta name="twitter:description" content="An unofficial, all-generations Pokémon field guide. Search, explore details, or try photo lookup with a manual search fallback." />
+    <meta name="twitter:description" content="An unofficial, all-generations Pokémon field guide. Search, explore details, or try a live camera scan with manual search fallback." />
     <meta name="twitter:image" content="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png" />
     <title>Pokédex Field Guide by Deep Datta Chaudhury</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preconnect" href="https://pokeapi.co" />
     <link rel="preconnect" href="https://raw.githubusercontent.com" />
-    <link rel="stylesheet" href="./styles.css?v=9" />
-    <script src="./app.js?v=4" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=10" />
+    <script src="./recognition-config.js?v=1" defer></script>
+    <script src="./app.js?v=5" defer></script>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -55,7 +56,7 @@
       </a>
       <nav class="main-nav" aria-label="Main navigation">
         <a class="nav-link active" href="#explore">Explore</a>
-        <button class="nav-link" id="nav-scan" type="button">Photo lookup</button>
+        <button class="nav-link" id="nav-scan" type="button">Scan Pokémon</button>
         <a class="nav-link" href="#about">About</a>
       </nav>
       <button class="button button-dark header-scan" id="header-scan" type="button">
@@ -156,7 +157,7 @@
         <span class="eyebrow">A FIELD GUIDE, MADE FOR CURIOUS TRAINERS</span>
         <h2 id="about-title">A little more about this Pokédex<span class="heading-period">.</span></h2>
         <p>Made by <strong>Deep Datta Chaudhury</strong>, this independent fan-made field guide makes it easy to explore Pokémon across all nine generations. Search by name or number, browse types, and open an entry for Pokédex descriptions, stats, abilities, evolutions, habitat, and general type matchups.</p>
-        <p>Photo lookup can open your camera or image library and preview your picture. It does <strong>not</strong> identify what is in a photo: no recognition model is configured. You can search the Pokédex manually instead; photos are not uploaded to a recognition service.</p>
+        <p>The camera scan can show a live preview and capture a frame. Pokémon identification is <strong>unavailable until a secure vision-service endpoint is configured</strong>; until then, use the manual Pokédex search. A camera frame is sent only when you choose identification and only to the endpoint you configure; an uploaded photo stays local for manual lookup.</p>
       </div>
       <aside class="about-sources" aria-label="Data, artwork, and Pokémon credits">
         <h3>Sources &amp; credits</h3>

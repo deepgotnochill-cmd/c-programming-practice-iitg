@@ -49,9 +49,20 @@ const state = {
   scanImageUrl: null,
   scanFile: null,
   manualSearch: "",
-  manualStage: "upload",
+  manualStage: "start",
   filterToken: 0,
+  cameraStream: null,
+  cameraToken: 0,
+  cameraFacing: "environment",
+  cameraDevices: [],
+  recognitionAbortController: null,
+  scanError: "",
+  recognitionResult: null,
 };
+
+const recognitionEndpoint = typeof window.POKEDEX_RECOGNITION_ENDPOINT === "string"
+  ? window.POKEDEX_RECOGNITION_ENDPOINT.trim()
+  : "";
 
 function readCache(key) {
   try {
@@ -598,47 +609,336 @@ function closeDetails() {
 }
 
 function startScan() {
-  if (!elements.dialog.open) elements.dialog.showModal();
+  stopCamera();
+  if (state.scanImageUrl) URL.revokeObjectURL(state.scanImageUrl);
+  state.scanImageUrl = null;
   state.scanFile = null;
+  if (!elements.dialog.open) elements.dialog.showModal();
   state.manualSearch = "";
-  state.manualStage = "upload";
+  state.manualStage = "start";
+  state.scanError = "";
+  state.recognitionResult = null;
+  renderScanDialog();
+}
+
+function stopCamera() {
+  state.cameraToken++;
+  state.cameraStream?.getTracks().forEach((track) => track.stop());
+  state.cameraStream = null;
+  const video = elements.scanContent.querySelector("#live-camera");
+  if (video) video.srcObject = null;
+}
+
+function cameraErrorMessage(error) {
+  if (!window.isSecureContext) {
+    return "Live camera access requires HTTPS or localhost. Open this page securely, or use manual Pokédex search.";
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return "This browser doesn’t support live camera access. Try a recent browser or use manual Pokédex search.";
+  }
+  if (error?.name === "NotAllowedError" || error?.name === "SecurityError") {
+    return "Camera permission was denied or blocked. Allow access in your browser’s site settings, then retry, or use manual search.";
+  }
+  if (error?.name === "NotFoundError" || error?.name === "OverconstrainedError") {
+    return "No usable camera was found on this device. Connect or enable a camera, or use manual Pokédex search.";
+  }
+  if (error?.name === "NotReadableError" || error?.name === "AbortError") {
+    return "The camera is unavailable or being used by another app. Close other camera apps and retry, or use manual search.";
+  }
+  return "The camera couldn’t be opened. Check your browser permissions and camera connection, then retry or use manual search.";
+}
+
+async function startLiveCamera(deviceId = "") {
+  stopCamera();
+  state.manualStage = "camera";
+  state.scanError = "";
+  renderScanDialog();
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    state.manualStage = "camera-error";
+    state.scanError = cameraErrorMessage();
+    renderScanDialog();
+    return;
+  }
+
+  const token = ++state.cameraToken;
+  const constraints = {
+    audio: false,
+    video: deviceId
+      ? { deviceId: { exact: deviceId } }
+      : { facingMode: { ideal: state.cameraFacing } },
+  };
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    if (token !== state.cameraToken || !elements.dialog.open) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    state.cameraStream = stream;
+    const video = elements.scanContent.querySelector("#live-camera");
+    if (!video) {
+      stopCamera();
+      return;
+    }
+    video.srcObject = stream;
+    await video.play();
+    if (token !== state.cameraToken || !elements.dialog.open) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    const cameraSelect = elements.scanContent.querySelector("#camera-select");
+    try {
+      state.cameraDevices = (await navigator.mediaDevices.enumerateDevices())
+        .filter((device) => device.kind === "videoinput");
+      if (cameraSelect) {
+        cameraSelect.replaceChildren(...state.cameraDevices.map((device, index) => {
+          const option = document.createElement("option");
+          option.value = device.deviceId;
+          option.textContent = device.label || `Camera ${index + 1}`;
+          return option;
+        }));
+        cameraSelect.hidden = state.cameraDevices.length < 2;
+        const cameraLabel = elements.scanContent.querySelector(".camera-select-label");
+        if (cameraLabel) cameraLabel.hidden = cameraSelect.hidden;
+        if (deviceId) cameraSelect.value = deviceId;
+        else {
+          const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId;
+          const active = state.cameraDevices.find((device) => device.deviceId === activeDeviceId);
+          const rear = state.cameraDevices.find((device) => /back|rear|environment/i.test(device.label));
+          if (active) cameraSelect.value = active.deviceId;
+          else if (rear) cameraSelect.value = rear.deviceId;
+          else if (state.cameraDevices[0]) cameraSelect.value = state.cameraDevices[0].deviceId;
+        }
+      }
+    } catch (error) {
+      console.warn("Could not list camera devices:", error);
+      if (cameraSelect) cameraSelect.hidden = true;
+    }
+    const status = elements.scanContent.querySelector("#camera-status");
+    if (status) status.textContent = "Camera ready. Center the Pokémon in the frame, then capture.";
+  } catch (error) {
+    if (token !== state.cameraToken) return;
+    stream?.getTracks().forEach((track) => track.stop());
+    state.cameraStream = null;
+    state.manualStage = "camera-error";
+    state.scanError = cameraErrorMessage(error);
+    renderScanDialog();
+  }
+}
+
+async function captureCameraFrame() {
+  const cameraToken = state.cameraToken;
+  const video = elements.scanContent.querySelector("#live-camera");
+  if (!video?.videoWidth || !video.videoHeight) {
+    const status = elements.scanContent.querySelector("#camera-status");
+    if (status) status.textContent = "The camera is still starting. Wait a moment and try again.";
+    return;
+  }
+  const scale = Math.min(1, 1600 / video.videoWidth);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  const context = canvas.getContext("2d");
+  if (!context) {
+    stopCamera();
+    state.manualStage = "camera-error";
+    state.scanError = "This browser couldn’t capture a camera frame. Try another browser or use manual search.";
+    renderScanDialog();
+    return;
+  }
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const image = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
+  if (cameraToken !== state.cameraToken || !elements.dialog.open) return;
+  if (!image) {
+    const status = elements.scanContent.querySelector("#camera-status");
+    if (status) status.textContent = "The camera frame couldn’t be saved. Please try capturing it again.";
+    return;
+  }
+  stopCamera();
+  if (state.scanImageUrl) URL.revokeObjectURL(state.scanImageUrl);
+  state.scanFile = new File([image], "camera-capture.jpg", { type: "image/jpeg" });
+  state.scanImageUrl = URL.createObjectURL(image);
+  state.manualStage = "capture-preview";
+  state.scanError = "";
+  state.recognitionResult = null;
   renderScanDialog();
 }
 
 function setScanFile(file) {
+  stopCamera();
   if (state.scanImageUrl) URL.revokeObjectURL(state.scanImageUrl);
   state.scanFile = file;
   state.scanImageUrl = URL.createObjectURL(file);
   state.manualSearch = "";
   state.manualStage = "preview";
+  state.scanError = "";
   renderScanDialog();
 }
 
-function renderScanDialog(errorMessage = "") {
+function validateRecognitionResult(data) {
+  if (!data || !["match", "uncertain", "no_match"].includes(data.status) || !Array.isArray(data.candidates)) {
+    throw new Error("The recognition service returned an unsupported response.");
+  }
+  const candidates = data.candidates
+    .filter((candidate) => candidate && Number.isInteger(candidate.id) && candidate.id >= 1 && candidate.id <= 1025
+      && Number.isFinite(candidate.confidence) && candidate.confidence >= 0 && candidate.confidence <= 1)
+    .filter((candidate, index, list) => list.findIndex((item) => item.id === candidate.id) === index)
+    .sort((left, right) => right.confidence - left.confidence)
+    .slice(0, 5);
+  if (data.status !== "no_match" && candidates.length === 0) {
+    throw new Error("The recognition service didn’t return a valid Pokémon match.");
+  }
+  return { status: data.status, candidates };
+}
+
+async function identifyCapturedFrame() {
+  if (!recognitionEndpoint) {
+    state.scanError = "Identification is unavailable because no recognition endpoint is configured. Search manually below.";
+    renderScanDialog();
+    return;
+  }
+  if (!state.scanFile) return;
+  let endpointUrl;
+  try {
+    endpointUrl = new URL(recognitionEndpoint, location.href);
+  } catch {
+    state.scanError = "The configured recognition endpoint URL is invalid. Check recognition-config.js.";
+    renderScanDialog();
+    return;
+  }
+  if (endpointUrl.protocol !== "https:" && endpointUrl.origin !== location.origin) {
+    state.scanError = "The recognition endpoint must use HTTPS or the same origin as this site.";
+    renderScanDialog();
+    return;
+  }
+  state.manualStage = "identifying";
+  state.scanError = "";
+  renderScanDialog();
+  const controller = new AbortController();
+  state.recognitionAbortController = controller;
+  const timeout = window.setTimeout(() => controller.abort(), 45000);
+  try {
+    const form = new FormData();
+    form.append("image", state.scanFile, state.scanFile.name);
+    const response = await fetch(recognitionEndpoint, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body: form,
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Recognition service returned HTTP ${response.status}.`);
+    const result = validateRecognitionResult(await response.json());
+    if (state.recognitionAbortController !== controller || !elements.dialog.open) return;
+    state.recognitionResult = result;
+    state.manualStage = "result";
+    renderScanDialog();
+    const best = result.candidates[0];
+    const name = state.species.find((entry) => entry.id === best?.id)?.name || "Pokémon";
+    elements.announcer.textContent = result.status === "no_match"
+      ? "No Pokémon detected. Try again or search manually."
+      : `Identification complete. Best match: ${normalizePokemonName(name)}.`;
+  } catch (error) {
+    if (state.recognitionAbortController !== controller || !elements.dialog.open) return;
+    state.manualStage = "capture-preview";
+    state.scanError = error.name === "AbortError"
+      ? "The recognition request timed out. Check the service and try again."
+      : `We couldn’t identify this image. ${error.message} Please retry or search manually.`;
+    renderScanDialog();
+  } finally {
+    window.clearTimeout(timeout);
+    if (state.recognitionAbortController === controller) state.recognitionAbortController = null;
+  }
+}
+
+function renderScanDialog() {
   const close = '<button class="icon-button dialog-close" type="button" aria-label="Close photo lookup">×</button>';
-  if (!state.scanFile) {
+  const error = state.scanError ? `<p class="scan-error" role="alert">${escapeHtml(state.scanError)}</p>` : "";
+  if (state.manualStage === "start") {
     elements.scanContent.innerHTML = `
-      <div class="dialog-heading-row"><h2 id="scan-title">Let’s meet that Pokémon.</h2>${close}</div>
-      <p class="dialog-description">Take a photo or choose one from your device. Your image stays on your device; it isn’t uploaded anywhere.</p>
-      ${errorMessage ? `<p class="scan-error" role="alert">${escapeHtml(errorMessage)}</p>` : ""}
-      <div class="upload-options">
-        <label class="upload-option"><span aria-hidden="true">⌾</span><strong>Take a photo</strong><small>Open your camera</small>
-          <input id="camera-file" type="file" accept="image/*" capture="environment" aria-label="Take a photo with your camera" />
-        </label>
-        <label class="upload-option"><span aria-hidden="true">↥</span><strong>Choose a photo</strong><small>Browse your device</small>
-          <input id="upload-file" type="file" accept="image/*" aria-label="Choose an image from your device" />
-        </label>
+      <div class="dialog-heading-row"><h2 id="scan-title">Scan a Pokémon.</h2>${close}</div>
+      <p class="dialog-description">Camera access lets this page show a live preview and capture one frame. Your camera stays off until you start it. ${recognitionEndpoint ? "The frame is sent to the configured recognition service only if you choose Identify Pokémon." : "Identification is unavailable until a recognition service is configured."}</p>
+      ${error}
+      <div class="retry-row">
+        <button class="button button-orange" id="start-camera" type="button">Start camera</button>
+        <button class="button button-outline" id="open-manual" type="button">Search manually</button>
       </div>
-      <p class="privacy-note">Image lookup is manual in this demo; no image-recognition service is connected.</p>`;
-  } else if (state.manualStage === "preview") {
+      <label class="upload-option upload-file-option"><span aria-hidden="true">↥</span><strong>Choose a photo instead</strong><small>Browse your device</small>
+          <input id="upload-file" type="file" accept="image/*" aria-label="Choose an image from your device" />
+      </label>
+      <p class="privacy-note">Camera permission is handled by your browser. Captured frames are sent only after you choose identification and only to your configured endpoint.</p>`;
+  } else if (state.manualStage === "camera") {
     elements.scanContent.innerHTML = `
-      <div class="dialog-heading-row"><h2 id="scan-title">Looking good?</h2>${close}</div>
-      <p class="dialog-description">${escapeHtml(state.scanFile.name)}</p>
-      <div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Preview of your selected Pokémon photo" /></div>
-      <div class="recognition-note"><strong>Demo mode:</strong> This app doesn’t have image recognition configured, so your photo has not been analyzed. Continue to search the Pokédex manually.</div>
+      <div class="dialog-heading-row"><h2 id="scan-title">Center the Pokémon.</h2>${close}</div>
+      <p class="dialog-description">Live preview · choose a camera if more than one is available.</p>
+      <div class="live-camera-frame"><video id="live-camera" autoplay muted playsinline aria-label="Live camera preview"></video></div>
+      <label class="camera-select-label" for="camera-select" hidden>Camera</label>
+      <select class="camera-select" id="camera-select" aria-label="Choose camera" hidden></select>
+      <p class="camera-status" id="camera-status" role="status" aria-live="polite">Starting camera…</p>
+      ${error}
       <div class="preview-actions">
-        <button class="button button-outline" id="retake-photo" type="button">Retake / choose another</button>
-        <button class="button button-orange" id="continue-manual" type="button">Continue</button>
+        <button class="button button-outline" id="stop-camera" type="button">Stop camera</button>
+        <button class="button button-orange" id="capture-frame" type="button">Capture frame</button>
+      </div>
+      <div class="retry-row"><button class="button button-outline" id="open-manual" type="button">Search manually instead</button></div>`;
+  } else if (state.manualStage === "camera-stopped" || state.manualStage === "camera-error") {
+    const unavailable = state.manualStage === "camera-error";
+    elements.scanContent.innerHTML = `
+      <div class="dialog-heading-row"><h2 id="scan-title">${unavailable ? "Camera unavailable." : "Camera stopped."}</h2>${close}</div>
+      <p class="dialog-description">${unavailable ? "Retry camera access, choose a photo, or continue with Pokédex search." : "The camera is no longer active. Restart it or search manually."}</p>
+      ${error}
+      <div class="retry-row">
+        <button class="button button-orange" id="retry-camera" type="button">${unavailable ? "Retry camera" : "Restart camera"}</button>
+        <button class="button button-outline" id="open-manual" type="button">Search manually</button>
+      </div>
+      ${unavailable ? `<label class="upload-option upload-file-option"><span aria-hidden="true">↥</span><strong>Choose a photo instead</strong><small>Browse your device</small>
+        <input id="upload-file" type="file" accept="image/*" aria-label="Choose an image from your device" />
+      </label>` : ""}`;
+  } else if (state.manualStage === "preview" || state.manualStage === "capture-preview") {
+    const cameraCapture = state.manualStage === "capture-preview";
+    elements.scanContent.innerHTML = `
+      <div class="dialog-heading-row"><h2 id="scan-title">${cameraCapture ? "Frame captured." : "Photo ready?"}</h2>${close}</div>
+      <p class="dialog-description">${cameraCapture ? "Review the frame before continuing." : escapeHtml(state.scanFile?.name || "Selected photo")}</p>
+      <div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Preview of your selected Pokémon photo" /></div>
+      ${cameraCapture
+        ? `<div class="recognition-note"><strong>${recognitionEndpoint ? "Ready to identify:" : "Identification unavailable:"}</strong> ${recognitionEndpoint ? "Choose Identify Pokémon to send this frame to your configured server-side service." : "No recognition endpoint is configured, so this frame has not been analyzed."}</div>`
+        : '<div class="recognition-note"><strong>Manual photo lookup:</strong> This selected image is not analyzed automatically.</div>'}
+      ${error}
+      <div class="preview-actions">
+        <button class="button button-outline" id="retake-photo" type="button">${cameraCapture ? "Rescan" : "Choose another"}</button>
+        ${cameraCapture && recognitionEndpoint
+          ? '<button class="button button-orange" id="identify-frame" type="button">Identify Pokémon</button>'
+          : '<button class="button button-orange" id="continue-manual" type="button">Search manually</button>'}
+      </div>`;
+  } else if (state.manualStage === "identifying") {
+    elements.scanContent.innerHTML = `
+      <div class="dialog-heading-row"><h2 id="scan-title">Identifying…</h2>${close}</div>
+      <div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Captured Pokémon frame being analyzed" /></div>
+      <div class="loading-state" role="status"><span class="loading-spinner" aria-hidden="true"></span><span>Checking with the configured recognition service…</span></div>
+      <button class="button button-outline" id="cancel-identification" type="button">Cancel</button>`;
+  } else if (state.manualStage === "result") {
+    const result = state.recognitionResult;
+    const top = result?.candidates[0];
+    const lowConfidence = result?.status === "uncertain" || (top && top.confidence < 0.75);
+    const candidates = lowConfidence ? result.candidates : (top ? [top] : []);
+    const candidateRows = candidates.map((candidate, index) => {
+      const species = state.species.find((entry) => entry.id === candidate.id);
+      if (!species) return "";
+      return `<div class="recognition-candidate">
+        <img src="${speciesArtwork(candidate.id)}" alt="" loading="lazy" />
+        <div><strong>${index === 0 ? "Best match · " : "Alternative · "}${escapeHtml(normalizePokemonName(species.name))}</strong>
+          <small>${displayNumber(candidate.id)} · ${Math.round(candidate.confidence * 100)}% confidence estimate</small></div>
+        <button class="button button-dark" type="button" data-result-pokemon="${candidate.id}">Open entry</button>
+      </div>`;
+    }).join("");
+    elements.scanContent.innerHTML = `
+      <div class="dialog-heading-row"><h2 id="scan-title">${result?.status === "no_match" ? "No Pokémon detected." : lowConfidence ? "Possible matches." : "Pokémon identified."}</h2>${close}</div>
+      <div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Captured Pokémon frame" /></div>
+      ${result?.status === "no_match"
+        ? '<div class="recognition-note"><strong>No match returned:</strong> The service did not detect a Pokémon. Try better lighting and a clearer subject, or search manually.</div>'
+        : `<div class="recognition-note"><strong>${lowConfidence ? "Uncertain result:" : "Best match:"}</strong> ${lowConfidence ? "Review these alternatives before opening an entry." : "Confidence is an estimate supplied by the configured recognition service."}</div><div class="recognition-candidates">${candidateRows}</div>`}
+      <div class="retry-row">
+        <button class="button button-outline" id="retake-photo" type="button">Rescan</button>
+        <button class="button button-orange" id="open-manual" type="button">Search manually</button>
       </div>`;
   } else {
     const query = state.manualSearch.trim().toLowerCase().replace(/^#/, "").replace(/^0+(?=\d)/, "");
@@ -646,8 +946,8 @@ function renderScanDialog(errorMessage = "") {
       /^\d+$/.test(query) ? entry.id === Number(query) : entry.name.includes(query)).slice(0, 5) : [];
     elements.scanContent.innerHTML = `
       <div class="dialog-heading-row"><h2 id="scan-title">Find it in the Pokédex.</h2>${close}</div>
-      <div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Your selected photo" /></div>
-      <div class="recognition-note"><strong>Manual lookup:</strong> Your photo hasn’t been identified. Search for the Pokémon you see below, or go back and try another photo.</div>
+      ${state.scanImageUrl ? `<div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Your selected photo" /></div>` : ""}
+      <div class="recognition-note"><strong>Manual lookup:</strong> ${state.scanImageUrl ? "Your photo hasn’t been identified. " : ""}Search for a Pokémon below, or return to scan options.</div>
       <label class="manual-search-label" for="manual-search">Pokémon name or Pokédex number</label>
       <div class="manual-search">
         <input id="manual-search" type="search" value="${escapeHtml(state.manualSearch)}" placeholder="Try Pikachu or 25" autocomplete="off" />
@@ -657,11 +957,11 @@ function renderScanDialog(errorMessage = "") {
         <button class="manual-result" type="button" data-manual-pokemon="${entry.id}">
           <img src="${speciesArtwork(entry.id)}" alt="" loading="lazy" /><strong>${escapeHtml(normalizePokemonName(entry.name))}</strong><small>${displayNumber(entry.id)}</small>
         </button>`).join("") || (query ? '<span class="manual-empty">No matching Pokémon. Try another name or number.</span>' : '<span class="manual-empty">Start typing to see matching Pokémon.</span>')}</div>
-      <div class="retry-row"><button class="button button-outline" id="retake-photo" type="button">Choose another photo</button></div>`;
+      <div class="retry-row"><button class="button button-outline" id="retake-photo" type="button">Back to scan options</button></div>`;
   }
 
   elements.scanContent.querySelectorAll(".dialog-close").forEach((button) => {
-    button.addEventListener("click", closeScanDialog);
+    button.addEventListener("click", () => closeScanDialog());
   });
   const cameraInput = elements.scanContent.querySelector("#camera-file");
   const uploadInput = elements.scanContent.querySelector("#upload-file");
@@ -670,11 +970,15 @@ function renderScanDialog(errorMessage = "") {
       const file = input.files?.[0];
       if (!file) return;
       if (!file.type.startsWith("image/")) {
-        renderScanDialog("Please choose an image file to continue.");
+        state.manualStage = "start";
+        state.scanError = "Please choose an image file to continue.";
+        renderScanDialog();
         return;
       }
       if (file.size > MAX_IMAGE_SIZE) {
-        renderScanDialog("That image is larger than 15 MB. Choose a smaller photo and try again.");
+        state.manualStage = "start";
+        state.scanError = "That image is larger than 15 MB. Choose a smaller photo and try again.";
+        renderScanDialog();
         return;
       }
       setScanFile(file);
@@ -689,7 +993,9 @@ function renderScanDialog(errorMessage = "") {
     if (state.scanImageUrl) URL.revokeObjectURL(state.scanImageUrl);
     state.scanImageUrl = null;
     state.scanFile = null;
-    state.manualStage = "upload";
+    state.manualStage = "start";
+    state.scanError = "";
+    state.recognitionResult = null;
     renderScanDialog();
   });
   elements.scanContent.querySelector("#continue-manual")?.addEventListener("click", () => {
@@ -707,6 +1013,30 @@ function renderScanDialog(errorMessage = "") {
     replacement.setSelectionRange(position, position);
   });
   elements.scanContent.querySelector("#browse-manual")?.addEventListener("click", () => closeScanDialog(true));
+  elements.scanContent.querySelector("#start-camera, #retry-camera")?.addEventListener("click", () => startLiveCamera());
+  elements.scanContent.querySelector("#stop-camera")?.addEventListener("click", () => {
+    stopCamera();
+    state.manualStage = "camera-stopped";
+    renderScanDialog();
+  });
+  elements.scanContent.querySelector("#capture-frame")?.addEventListener("click", captureCameraFrame);
+  elements.scanContent.querySelector("#camera-select")?.addEventListener("change", (event) => {
+    if (event.target.value) startLiveCamera(event.target.value);
+  });
+  elements.scanContent.querySelector("#identify-frame")?.addEventListener("click", identifyCapturedFrame);
+  elements.scanContent.querySelector("#cancel-identification")?.addEventListener("click", () => {
+    state.recognitionAbortController?.abort();
+    state.recognitionAbortController = null;
+    state.manualStage = "capture-preview";
+    renderScanDialog();
+  });
+  elements.scanContent.querySelector("#open-manual")?.addEventListener("click", () => {
+    stopCamera();
+    state.manualStage = "manual";
+    state.scanError = "";
+    renderScanDialog();
+    elements.scanContent.querySelector("#manual-search")?.focus();
+  });
   elements.scanContent.querySelectorAll("[data-manual-pokemon]").forEach((button) => {
     button.addEventListener("click", () => {
       const id = Number(button.dataset.manualPokemon);
@@ -714,9 +1044,19 @@ function renderScanDialog(errorMessage = "") {
       openDetails(id);
     });
   });
+  elements.scanContent.querySelectorAll("[data-result-pokemon]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.resultPokemon);
+      closeScanDialog();
+      openDetails(id);
+    });
+  });
 }
 
 function closeScanDialog(browse = false) {
+  stopCamera();
+  state.recognitionAbortController?.abort();
+  state.recognitionAbortController = null;
   if (elements.dialog.open) elements.dialog.close();
   if (state.scanImageUrl) URL.revokeObjectURL(state.scanImageUrl);
   state.scanImageUrl = null;
@@ -753,9 +1093,23 @@ function setupEvents() {
     if (event.target === elements.dialog) closeScanDialog();
   });
   elements.dialog.addEventListener("close", () => {
+    stopCamera();
+    state.recognitionAbortController?.abort();
+    state.recognitionAbortController = null;
     if (state.scanImageUrl) URL.revokeObjectURL(state.scanImageUrl);
     state.scanImageUrl = null;
     state.scanFile = null;
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && elements.dialog.open && state.cameraStream) {
+      stopCamera();
+      state.manualStage = "camera-stopped";
+      renderScanDialog();
+    }
+  });
+  window.addEventListener("pagehide", () => {
+    stopCamera();
+    state.recognitionAbortController?.abort();
   });
   window.addEventListener("popstate", () => {
     const match = location.hash.match(/^#pokemon-(\d+)$/);

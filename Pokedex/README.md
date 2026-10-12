@@ -2,7 +2,9 @@
 
 An unofficial, responsive Pokémon field guide made by **Deep Datta Chaudhury**. Search all 1,025 National Pokédex species, filter by type and generation, and open detailed entries for artwork, descriptions, stats, abilities, evolutions, habitat, and type matchups.
 
-This is a static HTML, CSS, and vanilla JavaScript site. It has **no framework, build step, package installation, server-side code, API key, or configured image-recognition service**. Pokémon data is requested from [PokéAPI](https://pokeapi.co/); official Pokémon artwork is displayed using artwork served by the [PokéAPI sprites project](https://github.com/PokeAPI/sprites). Pokémon, their names, and their artwork belong to their respective rights holders. This unofficial fan project is not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc., or The Pokémon Company.
+This is a static HTML, CSS, and vanilla JavaScript site. It has **no framework, build step, or package installation**. Pokémon data is requested from [PokéAPI](https://pokeapi.co/); official Pokémon artwork is displayed using artwork served by the [PokéAPI sprites project](https://github.com/PokeAPI/sprites). Pokémon, their names, and their artwork belong to their respective rights holders. This unofficial fan project is not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc., or The Pokémon Company.
+
+The live camera preview and frame capture are implemented. **Automatic identification is unavailable until you supply a server-side vision endpoint and configure its URL.** There is no recognition service, provider account, or API key included. Until then, the camera and photo upload remain usable for preview, and Pokédex manual search remains available; the app does not invent matches or confidence scores.
 
 ## Run and test locally
 
@@ -13,31 +15,23 @@ cd path\to\C-Programming(IITG)\Pokedex
 python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Then open `http://localhost:8000`. PokéAPI and artwork require an internet connection. Some browsers require a secure context for particular camera APIs; this site uses the phone's native image picker with the camera capture hint.
+Then open `http://localhost:8000`. PokéAPI and artwork require an internet connection. `localhost` is considered secure by current browsers and supports the live camera permission flow. The camera preview requires HTTPS or localhost; opening the site from another device at a plain `http://192.168...` address may not permit live camera access.
 
 ## Try the camera from a phone on your Wi-Fi
 
-1. Connect the computer and phone to the same trusted Wi-Fi network.
-2. In PowerShell, change to this `Pokedex` folder and start the local server:
-   ```powershell
-   python -m http.server 8000 --bind 0.0.0.0
-   ```
-3. On the computer, run `ipconfig` and note its IPv4 address for the active Wi-Fi adapter (for example, `192.168.1.25`).
-4. On the phone, open `http://192.168.1.25:8000`, substituting your computer's address.
-5. If Windows Firewall prompts you, allow Python on your **private network only**. Do not expose the temporary server to public Wi-Fi or the internet.
-6. Tap **Scan Pokémon** → **Take a photo**. The browser may ask for camera or photo-library permission.
-
-Keep PowerShell and the computer running while testing. This temporary HTTP address only works on the same network. For camera access over the public internet, use the HTTPS URL provided by a static host after deployment. A selected photo is previewed locally and isn't sent to a recognition service. Automatic visual identification is **not implemented**: continue to manual Pokédex search instead.
+For the live camera on a phone, use the site's HTTPS address after publishing. On the phone, open the site, tap **Scan Pokémon** → **Start camera**, and allow access in the browser prompt. The app requests the rear-facing camera when available and offers a camera selector if the browser reports multiple cameras. It stops the stream when the scan closes, the page is hidden, or you stop/capture the preview. On localhost, the same flow can be tested from the computer. A plain HTTP local-network address is not a reliable camera test; photo upload and manual search remain available there.
 
 ## Publish the site (beginner-friendly: Netlify Drop)
 
 Netlify is a simple static host for this project: it serves the existing files, provides HTTPS, and does not need a build command.
 
-1. Visit [Netlify Drop](https://app.netlify.com/drop), sign in to your own Netlify account, and deploy the **contents of this `Pokedex` folder** (including `index.html`, `styles.css`, `app.js`, `favicon.svg`, `robots.txt`, `sitemap.xml`, and `_headers`). Make sure `index.html` is at the published site root, not one directory deeper. Netlify will give you a public HTTPS URL; write down the exact hostname. Alternatively, connect this GitHub repository to Netlify, set `Pokedex` as the base directory and `.` as the publish directory relative to that base, and leave the build command blank.
+1. Visit [Netlify Drop](https://app.netlify.com/drop), sign in to your own Netlify account, and deploy the **contents of this `Pokedex` folder** (including `recognition-config.js`). Make sure `index.html` is at the published site root, not one directory deeper. Netlify will give you a public HTTPS URL; write down the exact hostname. Alternatively, connect this GitHub repository to Netlify, set `Pokedex` as the base directory and `.` as the publish directory relative to that base, and leave the build command blank.
 2. If you want a custom domain, connect a domain you own through your hosting provider and make sure its HTTPS certificate is ready. Otherwise use the HTTPS Netlify hostname assigned to your site.
 3. The canonical URL, Open Graph URL, JSON-LD metadata, `robots.txt`, and `sitemap.xml` are configured for `https://kaleidoscopic-custard-2a6567.netlify.app/`. If you connect a custom domain, update those URLs to your final canonical HTTPS address (preserving the trailing `/` on the homepage URLs) before redeploying.
 4. Redeploy the updated folder to the same Netlify site: open its **Deploys** page and drag in the updated site files, keeping `index.html` at the published root. A Git-connected site can instead deploy the update when you push your changes.
-5. Open the final HTTPS URL and verify the home page, Pokémon search and detail pages, filters, photo preview, About section, and footer. Check that `/robots.txt` and `/sitemap.xml` use your real hostname and search the deployed files for any remaining `.example` placeholders.
+5. Open the final HTTPS URL and verify the home page, Pokémon search and detail pages, filters, camera permission and preview, photo upload, About section, and footer. Check that `/robots.txt` and `/sitemap.xml` use your real hostname and search the deployed files for any remaining `.example` placeholders.
+
+Netlify Drop publishes only the static site files; it does not create a recognition backend. The camera works on the HTTPS site, but identification stays clearly unavailable until you host and connect the separate server-side endpoint described below.
 
 This workflow publishes the files but does **not** create an account or publish anything automatically for you.
 
@@ -52,15 +46,42 @@ Search metadata, social-sharing previews, a canonical URL, `robots.txt`, an XML 
 
 Google must be able to fetch the published site, its sitemap, and its metadata. Search crawling and indexing take time; indexing and ranking are controlled by Google and are **not guaranteed**. The author name is presented accurately in the site's title, description, About section, footer, and structured data, without promising a particular search result or ranking. The site is a client-rendered Pokédex: individual Pokémon details are reached through in-page hash links, so the sitemap lists the single public homepage.
 
-## Image recognition and privacy
+## Recognition endpoint setup
 
-The photo interface can open a phone camera or existing image, show a preview, accept another photo, and offer manual search. It validates that the selected file is an image and is at most 15 MB. It **does not upload, analyze, or identify images**, and never invents confidence scores. To add real recognition, build and secure a server-side vision endpoint and explicitly connect it to the app; keep provider credentials on the server, never in browser files.
+The client integration is ready, but a real vision service and its server adapter still need to be supplied. Do not put provider keys in `app.js`, `recognition-config.js`, or any other frontend file.
+
+1. Host a server-side adapter at an HTTPS URL (or same-origin route such as `/api/identify`). Choose and configure a vision provider that can recognize Pokémon. Configure these environment variables **on the backend host**, not in this repository:
+   - `POKEDEX_VISION_API_URL` — the provider's vision API endpoint.
+   - `POKEDEX_VISION_API_KEY` — the provider credential; keep it secret.
+   - `POKEDEX_VISION_MODEL` — the provider's selected vision model identifier.
+   The backend implementation must read these settings, securely call the selected provider, and never return the key to the browser. There is no backend or provider-specific adapter included yet, so these settings have no effect until that server code is implemented and deployed. Follow the selected provider's current documentation for exact credentials, model availability, usage costs, and image policies.
+2. Configure the public endpoint URL in `recognition-config.js`:
+   ```js
+   window.POKEDEX_RECOGNITION_ENDPOINT = "https://YOUR-SERVER.example/api/identify";
+   ```
+   For a same-origin server route, use `"/api/identify"`.    The browser makes a `POST` with `multipart/form-data` field `image` containing the captured JPEG camera frame, and requests a JSON response. In this version, an uploaded photo remains local and uses manual search. Cross-origin endpoints must allow this site's origin through CORS. Use HTTPS for remote endpoints.
+3. Have the server return this contract (confidence is a number from `0` to `1`; candidates should be sorted by confidence and use National Pokédex IDs 1–1025):
+   ```json
+   {
+     "status": "uncertain",
+     "candidates": [
+       { "id": 25, "confidence": 0.72 },
+       { "id": 26, "confidence": 0.18 }
+     ]
+   }
+   ```
+   `status` must be `"match"`, `"uncertain"`, or `"no_match"`. For no Pokémon detected, return `{"status":"no_match","candidates":[]}`. The client displays alternatives for `"uncertain"` results or a top confidence below 75%, and opens the existing Pokédex entry for the selected candidate. Confidence is a provider estimate, not a guarantee.
+4. Validate image type and size on the server, limit request size and rate, return useful non-2xx errors, and review the provider's data retention and privacy terms. A camera frame is sent only after the user taps **Identify Pokémon** and only to the configured endpoint. Uploaded photos stay local and use manual search. Without endpoint configuration, no photo is uploaded or analyzed.
+5. For local integration, run the front end at `http://localhost:8000` as above and run your backend separately. Set the endpoint to its HTTPS URL or a same-origin proxy. For production, deploy the static front end and backend separately (or add a serverless function to your hosting project), set the three server environment variables in the host's function/service settings, configure `recognition-config.js`, then redeploy. Netlify Drop alone cannot deploy a serverless function.
+
+Until an endpoint returns a valid response and is tested with real images, identification remains unavailable; the camera preview and manual search still work. A failed request, unsupported response, timeout, or no-match result is shown as such—no fallback identification is fabricated.
 
 ## Included files
 
 - `index.html` — accessible site structure, SEO/social metadata, JSON-LD, and About/credits.
 - `styles.css` — responsive visual design, reduced-motion support, and visible keyboard focus.
-- `app.js` — PokéAPI search, filters, offline cache, detail views, and local photo/manual-search flow.
+- `app.js` — PokéAPI search, filters, offline cache, detail views, camera capture, and recognition endpoint client.
+- `recognition-config.js` — public recognition endpoint URL only; never place credentials here.
 - `favicon.svg` — original Pokédex-inspired site icon.
-- `robots.txt` and `sitemap.xml` — static-host search-discovery files (update the domain placeholders before deployment).
+- `robots.txt` and `sitemap.xml` — static-host search-discovery files (update the domain if you use a custom hostname).
 - `_headers` — recommended response headers for Netlify-style static hosts.
