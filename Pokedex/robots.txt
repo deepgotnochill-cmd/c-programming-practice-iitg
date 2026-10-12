@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# If you switch to a custom domain, update this sitemap URL before publishing.
+Sitemap: https://kaleidoscopic-custard-2a6567.netlify.app/sitemap.xml

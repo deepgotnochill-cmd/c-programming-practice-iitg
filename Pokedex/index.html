@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Explore all 1,025 Pokémon with Deep Datta Chaudhury’s unofficial Pokédex: search every generation, browse Pokémon details, and try photo lookup with a manual search fallback."
+    />
+    <meta name="author" content="Deep Datta Chaudhury" />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <meta name="theme-color" content="#faf8f3" />
+    <link rel="canonical" href="https://kaleidoscopic-custard-2a6567.netlify.app/" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:site_name" content="Pokédex Field Guide" />
+    <meta property="og:title" content="Pokédex Field Guide — by Deep Datta Chaudhury" />
+    <meta property="og:description" content="An unofficial, all-generations Pokémon field guide by Deep Datta Chaudhury. Browse Pokémon details, types, evolutions, and more." />
+    <meta property="og:url" content="https://kaleidoscopic-custard-2a6567.netlify.app/" />
+    <meta property="og:image" content="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png" />
+    <meta property="og:image:alt" content="Pikachu official artwork, served by the PokéAPI sprites project" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Pokédex Field Guide — by Deep Datta Chaudhury" />
+    <meta name="twitter:description" content="An unofficial, all-generations Pokémon field guide. Search, explore details, or try photo lookup with a manual search fallback." />
+    <meta name="twitter:image" content="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png" />
+    <title>Pokédex Field Guide by Deep Datta Chaudhury</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://pokeapi.co" />
+    <link rel="preconnect" href="https://raw.githubusercontent.com" />
+    <link rel="stylesheet" href="./styles.css?v=9" />
+    <script src="./app.js?v=4" defer></script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Pokédex Field Guide by Deep Datta Chaudhury",
+        "url": "https://kaleidoscopic-custard-2a6567.netlify.app/",
+        "description": "An unofficial Pokémon field guide and Pokédex browser created by Deep Datta Chaudhury.",
+        "author": {
+          "@type": "Person",
+          "name": "Deep Datta Chaudhury"
+        },
+        "inLanguage": "en"
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="wordmark" href="./" aria-label="Pokédex home">
+        <span class="wordmark-icon" aria-hidden="true">◉</span>
+        <span>poké<span class="wordmark-accent">dex</span></span>
+      </a>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a class="nav-link active" href="#explore">Explore</a>
+        <button class="nav-link" id="nav-scan" type="button">Photo lookup</button>
+        <a class="nav-link" href="#about">About</a>
+      </nav>
+      <button class="button button-dark header-scan" id="header-scan" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3m3-4h10m-5-5v10" /></svg>
+        Scan Pokémon
+      </button>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <span class="eyebrow"><span class="eyebrow-dot"></span> YOUR POCKET-SIZED FIELD GUIDE</span>
+          <h1 id="hero-title">Every Pokémon<br />has a <span>story.</span></h1>
+          <p>Meet your next favorite. Search the Pokédex or start with a photo and find your Pokémon.</p>
+          <div class="hero-actions">
+            <button class="button button-orange button-large" id="hero-scan" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3m3-4h10m-5-5v10" /></svg>
+              Scan a Pokémon
+            </button>
+            <a class="text-link" href="#explore">Explore the Pokédex <span aria-hidden="true">↓</span></a>
+          </div>
+          <div class="hero-note"><span class="note-icon" aria-hidden="true">✳</span> A whole world of Pokémon, one little field guide.</div>
+        </div>
+        <div class="hero-art" role="img" aria-label="Pikachu official artwork, shown beside its Pokédex number and Electric type">
+          <div class="hero-orbit orbit-one"></div>
+          <div class="hero-orbit orbit-two"></div>
+          <div class="hero-spark spark-one">✦</div>
+          <div class="hero-spark spark-two">✳</div>
+          <span class="hero-number">#025</span>
+          <img
+            class="hero-pokemon"
+            src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png"
+            alt="Pikachu"
+            width="315"
+            height="315"
+            fetchpriority="high"
+          />
+          <div class="hero-caption"><span>THE ELECTRIC MOUSE</span><strong>Pikachu</strong></div>
+          <span class="hero-type type-electric">Electric</span>
+        </div>
+        <span class="hero-decoration decoration-one" aria-hidden="true"></span>
+        <span class="hero-decoration decoration-two" aria-hidden="true"></span>
+      </section>
+
+      <section class="explore-section" id="explore" aria-labelledby="explore-title">
+        <div class="section-heading">
+          <div>
+            <span class="eyebrow">THE ORIGINAL FIELD GUIDE</span>
+            <h2 id="explore-title">Find your Pokémon<span class="heading-period">.</span></h2>
+            <p class="section-subtitle">Search by name, number, or type. There’s a Pokémon for everyone.</p>
+          </div>
+          <span class="result-count" id="result-count" aria-live="polite"></span>
+        </div>
+
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></svg>
+          <label class="visually-hidden" for="pokemon-search">Search Pokémon by name or Pokédex number</label>
+          <input id="pokemon-search" type="search" placeholder="Try “Pikachu” or “#025”..." autocomplete="off" />
+          <kbd>/</kbd>
+        </div>
+
+        <div class="filter-row" aria-label="Filter Pokémon">
+          <label class="filter-select">
+            <span class="visually-hidden">Filter by type</span>
+            <select id="type-filter">
+              <option value="">All types</option>
+            </select>
+            <span class="select-chevron" aria-hidden="true">⌄</span>
+          </label>
+          <label class="filter-select">
+            <span class="visually-hidden">Filter by generation</span>
+            <select id="generation-filter">
+              <option value="">All generations</option>
+              <option value="1">Generation I</option>
+              <option value="2">Generation II</option>
+              <option value="3">Generation III</option>
+              <option value="4">Generation IV</option>
+              <option value="5">Generation V</option>
+              <option value="6">Generation VI</option>
+              <option value="7">Generation VII</option>
+              <option value="8">Generation VIII</option>
+              <option value="9">Generation IX</option>
+            </select>
+            <span class="select-chevron" aria-hidden="true">⌄</span>
+          </label>
+          <button class="clear-filters" id="clear-filters" type="button" hidden>Clear filters</button>
+          <span class="connection-status" id="connection-status" role="status"></span>
+        </div>
+
+        <div id="content" aria-live="polite" aria-busy="true">
+          <div class="loading-state"><span class="loading-spinner"></span><span>Turning the pages of the Pokédex...</span></div>
+        </div>
+      </section>
+    </main>
+
+    <section class="about-section" id="about" aria-labelledby="about-title">
+      <div class="about-copy">
+        <span class="eyebrow">A FIELD GUIDE, MADE FOR CURIOUS TRAINERS</span>
+        <h2 id="about-title">A little more about this Pokédex<span class="heading-period">.</span></h2>
+        <p>Made by <strong>Deep Datta Chaudhury</strong>, this independent fan-made field guide makes it easy to explore Pokémon across all nine generations. Search by name or number, browse types, and open an entry for Pokédex descriptions, stats, abilities, evolutions, habitat, and general type matchups.</p>
+        <p>Photo lookup can open your camera or image library and preview your picture. It does <strong>not</strong> identify what is in a photo: no recognition model is configured. You can search the Pokédex manually instead; photos are not uploaded to a recognition service.</p>
+      </div>
+      <aside class="about-sources" aria-label="Data, artwork, and Pokémon credits">
+        <h3>Sources &amp; credits</h3>
+        <p>Pokémon species data is provided by <a href="https://pokeapi.co/" target="_blank" rel="noopener noreferrer">PokéAPI</a>. Artwork is served by the <a href="https://github.com/PokeAPI/sprites" target="_blank" rel="noopener noreferrer">PokéAPI sprites project</a>; Pokémon and character artwork remain the property of their respective rights holders.</p>
+        <p>Pokémon is a trademark of Nintendo, Creatures Inc., and GAME FREAK inc. This unofficial fan project is not affiliated with or endorsed by them. For official entries, visit the <a href="https://www.pokemon.com/us/pokedex" target="_blank" rel="noopener noreferrer">official Pokémon Pokédex</a>.</p>
+      </aside>
+    </section>
+
+    <footer class="site-footer">
+      <a class="wordmark footer-wordmark" href="./"><span class="wordmark-icon" aria-hidden="true">◉</span><span>poké<span class="wordmark-accent">dex</span></span></a>
+      <p>Made by Deep Datta Chaudhury · An unofficial Pokémon fan project. Data by <a href="https://pokeapi.co/" target="_blank" rel="noopener noreferrer">PokéAPI</a>; artwork by the <a href="https://github.com/PokeAPI/sprites" target="_blank" rel="noopener noreferrer">PokéAPI sprites project</a>. Pokémon and related characters are trademarks and © their respective rights holders.</p>
+      <a class="footer-about-link" href="#about">About this site ↑</a>
+    </footer>
+
+    <dialog class="scan-dialog" id="scan-dialog" aria-labelledby="scan-title">
+      <div class="dialog-topline">
+        <span class="eyebrow">A LITTLE FIELD RESEARCH</span>
+      </div>
+      <div id="scan-content"></div>
+    </dialog>
+    <div class="sr-only" id="announcer" aria-live="assertive"></div>
+  </body>
+</html>
