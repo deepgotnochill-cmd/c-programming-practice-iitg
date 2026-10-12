@@ -320,12 +320,17 @@ kbd { display: grid; width: 21px; height: 21px; place-items: center; border: 1px
 .retry-row > * { flex: 1; }
 .scan-error { padding: 11px; border-radius: 7px; background: #f8e7e2; color: #994d3a; font-size: 11px; line-height: 1.6; }
 .upload-file-option { width: 100%; margin-top: 12px; }
-.live-camera-frame { display: grid; min-height: 190px; max-height: min(52vh, 390px); margin: 15px 0 10px; place-items: center; overflow: hidden; border-radius: 9px; background: #1f2823; }
-.live-camera-frame video { display: block; width: 100%; max-height: min(52vh, 390px); object-fit: contain; }
+.live-camera-frame { position: relative; display: grid; min-height: 190px; max-height: min(52vh, 390px); margin: 15px 0 10px; aspect-ratio: 4 / 3; place-items: center; overflow: hidden; border: 1px solid #344e3d; border-radius: 10px; background: #1f2823; box-shadow: 0 0 0 3px #344e3d12, inset 0 0 34px #18231d; }
+.live-camera-frame::before { position: absolute; z-index: 2; inset: 10px; border: 1px solid #ffffff40; border-radius: 7px; content: ""; pointer-events: none; }
+.live-camera-frame::after { position: absolute; z-index: 2; top: 0; right: 10px; left: 10px; height: 2px; background: linear-gradient(90deg, transparent, #f27b50, #ffd495, #f27b50, transparent); opacity: 0; content: ""; pointer-events: none; }
+.live-camera-frame.scan-active::after { opacity: .85; animation: scan-sweep 2.8s ease-in-out infinite alternate; }
+.live-camera-frame video { display: block; width: 100%; height: 100%; max-height: min(52vh, 390px); object-fit: cover; }
+@keyframes scan-sweep { from { transform: translateY(7px); } to { transform: translateY(calc(min(52vh, 390px) - 10px)); } }
 .camera-select-label { display: inline-block; margin: 4px 8px 4px 0; color: #536257; font-size: 11px; font-weight: 700; }
 .camera-select { max-width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid #e5e1d8; border-radius: 7px; background: #fff; color: var(--ink); }
 .camera-select[hidden], .camera-select-label[hidden] { display: none; }
-.camera-status { margin: 8px 0; color: #5f6a60; font-size: 11px; line-height: 1.6; }
+.camera-status { min-height: 2.8em; margin: 8px 0; color: #5f6a60; font-size: 11px; line-height: 1.6; }
+.camera-status-error { color: #873b2e; }
 .recognition-candidates { display: grid; gap: 8px; margin-top: 12px; }
 .recognition-candidate { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px; border: 1px solid #eeeae3; border-radius: 8px; background: #fff; }
 .recognition-candidate img { width: 48px; height: 48px; object-fit: contain; }
@@ -333,6 +338,12 @@ kbd { display: grid; width: 21px; height: 21px; place-items: center; border: 1px
 .recognition-candidate strong { overflow-wrap: anywhere; font-size: 11px; }
 .recognition-candidate small { color: #5f6a60; font-size: 9px; line-height: 1.5; }
 .recognition-candidate .button { min-height: 40px; padding: 0 10px; }
+.narration-controls { display: flex; gap: 8px; margin-top: 19px; flex-wrap: wrap; }
+.narration-controls .button { min-height: 42px; }
+.narration-status { margin: 8px 0 0; color: #5f6a60; font-size: 10px; line-height: 1.6; }
+.narration-text { margin-top: 7px; color: #526054; font-size: 11px; line-height: 1.75; }
+.narration-text summary { width: fit-content; cursor: pointer; font-weight: 700; text-underline-offset: 3px; }
+.narration-text p { margin: 8px 0 0; }
 
 @media (max-width: 900px) {
   .site-header, main { padding-right: 4.3vw; padding-left: 4.3vw; }
@@ -421,6 +432,8 @@ kbd { display: grid; width: 21px; height: 21px; place-items: center; border: 1px
   .recognition-candidate { grid-template-columns: 42px minmax(0, 1fr); }
   .recognition-candidate img { width: 42px; height: 42px; }
   .recognition-candidate .button { grid-column: 2; justify-self: start; }
+  .narration-controls { gap: 7px; }
+  .narration-controls .button { flex: 1 1 calc(50% - 7px); padding: 0 9px; font-size: 11px; }
 }
 @media (max-width: 360px) {
   .site-header { padding-right: 12px; padding-left: 12px; gap: 7px; }

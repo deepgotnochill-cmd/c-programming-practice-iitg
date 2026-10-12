@@ -58,11 +58,19 @@ const state = {
   recognitionAbortController: null,
   scanError: "",
   recognitionResult: null,
+  recognitionTimer: null,
+  recognitionFailures: 0,
+  autoNarratePokemonId: null,
+  autoNarrationAnnouncement: "",
+  narrationText: "",
+  narrationMuted: false,
 };
 
-const recognitionEndpoint = typeof window.POKEDEX_RECOGNITION_ENDPOINT === "string"
-  ? window.POKEDEX_RECOGNITION_ENDPOINT.trim()
-  : "";
+function configuredRecognitionEndpoint() {
+  return typeof window.POKEDEX_RECOGNITION_ENDPOINT === "string"
+    ? window.POKEDEX_RECOGNITION_ENDPOINT.trim()
+    : "";
+}
 
 function readCache(key) {
   try {
@@ -456,10 +464,17 @@ function renderEvolutionTree(chain) {
     </li>`;
 }
 
+function evolutionNames(chain) {
+  if (!chain) return [];
+  return [normalizePokemonName(chain.species.name), ...chain.evolves_to.flatMap(evolutionNames)];
+}
+
 function typeEffectiveness(typeDetails) {
   const multipliers = new Map(TYPE_NAMES.map((type) => [type, 1]));
+  const strengths = new Set();
   for (const type of typeDetails) {
     const relations = type.damage_relations;
+    for (const entry of relations.double_damage_to) strengths.add(entry.name);
     for (const entry of relations.double_damage_from) {
       multipliers.set(entry.name, multipliers.get(entry.name) * 2);
     }
@@ -471,6 +486,7 @@ function typeEffectiveness(typeDetails) {
     }
   }
   return {
+    strengths: [...strengths].map((type) => ({ type, multiplier: 2 })),
     weaknesses: [...multipliers].filter(([, multiplier]) => multiplier > 1).map(([type, multiplier]) => ({ type, multiplier })),
     resistances: [...multipliers].filter(([, multiplier]) => multiplier > 0 && multiplier < 1).map(([type, multiplier]) => ({ type, multiplier })),
     immunities: [...multipliers].filter(([, multiplier]) => multiplier === 0).map(([type]) => ({ type, multiplier: 0 })),
@@ -487,6 +503,43 @@ function renderEffects(items, emptyText) {
     <span class="effect-pill type-${escapeHtml(type)}">${titleCase(escapeHtml(type))}<strong>${formatMultiplier(multiplier)}</strong></span>`).join("")}</div>`;
 }
 
+function stopNarration(updateStatus = true) {
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  if (updateStatus) {
+    const status = document.querySelector("#narration-status");
+    if (status) status.textContent = "Narration stopped. The summary text is available below.";
+  }
+}
+
+function speakNarration(text) {
+  if (state.narrationMuted) {
+    const status = document.querySelector("#narration-status");
+    if (status) status.textContent = "Voice is muted. The summary text is available below.";
+    return;
+  }
+  if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") {
+    const status = document.querySelector("#narration-status");
+    if (status) status.textContent = "Speech playback is not supported here. Read the summary text below.";
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-US";
+  utterance.rate = 0.96;
+  utterance.pitch = 1;
+  const status = document.querySelector("#narration-status");
+  if (status) status.textContent = "Narrating Pokémon details…";
+  utterance.onend = () => {
+    if (status) status.textContent = "Narration complete. Replay it anytime.";
+  };
+  utterance.onerror = (event) => {
+    if (event.error !== "canceled" && status) {
+      status.textContent = "Voice playback couldn’t start. Read the summary text below.";
+    }
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
 function renderDetail(pokemon, species, typeDetails, evolutionChain) {
   const types = pokemon.types.map((entry) => entry.type.name);
   const effects = typeEffectiveness(typeDetails);
@@ -501,6 +554,16 @@ function renderDetail(pokemon, species, typeDetails, evolutionChain) {
   const genus = species.genera.find((entry) => entry.language.name === "en")?.genus || "Pokémon";
   const generation = species.generation.name.replace("generation-", "");
   const habitat = species.habitat ? normalizePokemonName(species.habitat.name) : "Unknown";
+  const description = englishFlavorText(species);
+  const statSummary = pokemon.stats.map(({ base_stat: value, stat }) =>
+    `${STAT_LABELS[stat.name] || titleCase(stat.name)} ${value}`).join(", ");
+  const abilitySummary = pokemon.abilities.map(({ ability, is_hidden }) =>
+    `${normalizePokemonName(ability.name)}${is_hidden ? " (hidden ability)" : ""}`).join(", ") || "not listed";
+  const evolutionSummary = evolutionChain ? evolutionNames(evolutionChain).join(", ") : "not available";
+  const matchupSummary = (label, items) => `${label}: ${items.length
+    ? items.map(({ type, multiplier }) => `${titleCase(type)} ${formatMultiplier(multiplier)}`).join(", ")
+    : "none"}`;
+  const narrationText = `${normalizePokemonName(pokemon.name)}. National Pokédex number ${pokemon.id}, Generation ${generation.toUpperCase()}. Category: ${genus}. Type${types.length === 1 ? "" : "s"}: ${types.map(titleCase).join(" and ")}. Pokédex description: ${description} Abilities: ${abilitySummary}. Base stats: ${statSummary}. Evolution family: ${evolutionSummary}. Habitat: ${habitat}. ${matchupSummary("Strong against", effects.strengths)}. ${matchupSummary("Weaknesses", effects.weaknesses)}. ${matchupSummary("Resistances", effects.resistances)}. ${matchupSummary("Immunities", effects.immunities)}. These are general game rules and can vary by game, moves, abilities, and battle conditions.`;
   const evolutionHtml = evolutionChain
     ? `<ul class="evolution-tree">${renderEvolutionTree(evolutionChain)}</ul>`
     : '<span class="panel-caption">Evolution details are not available.</span>';
@@ -521,6 +584,14 @@ function renderDetail(pokemon, species, typeDetails, evolutionChain) {
             <div class="detail-fact"><span>Weight</span><strong>${(pokemon.weight / 10).toFixed(1)} kg</strong></div>
             <div class="detail-fact"><span>Habitat</span><strong>${escapeHtml(habitat)}</strong></div>
           </div>
+          <div class="narration-controls" aria-label="Pokémon narration controls">
+            <button class="button button-dark" id="narration-replay" type="button">Replay narration</button>
+            <button class="button button-outline" id="narration-stop" type="button">Stop narration</button>
+            <button class="button button-outline" id="narration-mute" type="button" aria-pressed="${state.narrationMuted}">${state.narrationMuted ? "Unmute voice" : "Mute voice"}</button>
+            <button class="button button-orange" id="scan-another" type="button">Scan another Pokémon</button>
+          </div>
+          <p class="narration-status" id="narration-status" role="status" aria-live="polite">Pokédex summary is available as text below.</p>
+          <details class="narration-text"><summary>Read the spoken summary</summary><p>${escapeHtml(narrationText)}</p></details>
         </div>
       </section>
       <div class="detail-panels">
@@ -535,6 +606,7 @@ function renderDetail(pokemon, species, typeDetails, evolutionChain) {
         <section class="detail-panel wide" aria-labelledby="matchup-heading">
           <h3 id="matchup-heading">Type matchups</h3>
           <p class="panel-caption">How other types’ moves affect ${escapeHtml(normalizePokemonName(pokemon.name))}.</p>
+          <div class="effect-group"><p class="effect-heading">Strong against</p>${renderEffects(effects.strengths, "No offensive strengths listed.")}</div>
           <div class="effect-group"><p class="effect-heading">Weak to</p>${renderEffects(effects.weaknesses, "No type weaknesses.")}</div>
           <div class="effect-group"><p class="effect-heading">Resistant to</p>${renderEffects(effects.resistances, "No type resistances.")}</div>
           <div class="effect-group"><p class="effect-heading">Immune to</p>${renderEffects(effects.immunities, "No type immunities.")}</div>
@@ -546,13 +618,35 @@ function renderDetail(pokemon, species, typeDetails, evolutionChain) {
         </section>
       </div>
     </article>`;
+  state.narrationText = narrationText;
   elements.content.querySelector("#back-to-list").addEventListener("click", closeDetails);
+  elements.content.querySelector("#narration-replay").addEventListener("click", () => speakNarration(state.narrationText));
+  elements.content.querySelector("#narration-stop").addEventListener("click", () => stopNarration());
+  elements.content.querySelector("#narration-mute").addEventListener("click", (event) => {
+    state.narrationMuted = !state.narrationMuted;
+    event.currentTarget.setAttribute("aria-pressed", String(state.narrationMuted));
+    event.currentTarget.textContent = state.narrationMuted ? "Unmute voice" : "Mute voice";
+    if (state.narrationMuted) stopNarration(false);
+    const status = elements.content.querySelector("#narration-status");
+    if (status) status.textContent = state.narrationMuted
+      ? "Voice is muted. The summary text is available below."
+      : "Voice is on. Replay the Pokédex summary when you’re ready.";
+  });
+  elements.content.querySelector("#scan-another").addEventListener("click", startScan);
   elements.content.querySelectorAll("[data-evolution]").forEach((button) => {
     button.addEventListener("click", () => {
       const match = state.species.find((entry) => entry.name === button.dataset.evolution);
       if (match) openDetails(match.id);
     });
   });
+  const autoNarrate = state.autoNarratePokemonId === pokemon.id;
+  if (autoNarrate) {
+    const announcement = state.autoNarrationAnnouncement;
+    state.autoNarratePokemonId = null;
+    state.autoNarrationAnnouncement = "";
+    elements.announcer.textContent = announcement;
+    speakNarration(`${announcement} ${narrationText}`);
+  }
 }
 
 async function openDetails(id, pushHistory = true) {
@@ -582,11 +676,16 @@ async function openDetails(id, pushHistory = true) {
     if (token !== state.renderToken) return;
     state.selectedPokemon = pokemon.id;
     state.detailView = true;
+    const autoNarrated = state.autoNarratePokemonId === pokemon.id;
     renderDetail(pokemon, species, typeDetails, evolutionChain);
     elements.content.setAttribute("aria-busy", "false");
-    elements.announcer.textContent = `${normalizePokemonName(pokemon.name)} Pokédex details loaded`;
+    if (!autoNarrated) {
+      elements.announcer.textContent = `${normalizePokemonName(pokemon.name)} Pokédex details loaded`;
+    }
   } catch (error) {
     if (token !== state.renderToken) return;
+    state.autoNarratePokemonId = null;
+    state.autoNarrationAnnouncement = "";
     elements.content.setAttribute("aria-busy", "false");
     elements.content.innerHTML = `
       <div class="state-panel detail-error" role="alert">
@@ -601,6 +700,7 @@ async function openDetails(id, pushHistory = true) {
 }
 
 function closeDetails() {
+  stopNarration(false);
   state.detailView = false;
   state.selectedPokemon = null;
   state.renderToken++;
@@ -609,6 +709,7 @@ function closeDetails() {
 }
 
 function startScan() {
+  stopNarration(false);
   stopCamera();
   if (state.scanImageUrl) URL.revokeObjectURL(state.scanImageUrl);
   state.scanImageUrl = null;
@@ -623,6 +724,12 @@ function startScan() {
 
 function stopCamera() {
   state.cameraToken++;
+  if (state.recognitionTimer) {
+    window.clearTimeout(state.recognitionTimer);
+    state.recognitionTimer = null;
+  }
+  state.recognitionAbortController?.abort();
+  state.recognitionAbortController = null;
   state.cameraStream?.getTracks().forEach((track) => track.stop());
   state.cameraStream = null;
   const video = elements.scanContent.querySelector("#live-camera");
@@ -652,6 +759,20 @@ async function startLiveCamera(deviceId = "") {
   stopCamera();
   state.manualStage = "camera";
   state.scanError = "";
+  const recognitionEndpoint = configuredRecognitionEndpoint();
+  if (recognitionEndpoint) {
+    try {
+      const endpointUrl = new URL(recognitionEndpoint, location.href);
+      if (endpointUrl.protocol !== "https:" && endpointUrl.origin !== location.origin) {
+        throw new Error("The recognition endpoint must use HTTPS or the same origin as this site.");
+      }
+    } catch (error) {
+      state.manualStage = "camera-error";
+      state.scanError = `The recognition endpoint is not configured securely. ${error.message}`;
+      renderScanDialog();
+      return;
+    }
+  }
   renderScanDialog();
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
     state.manualStage = "camera-error";
@@ -675,6 +796,15 @@ async function startLiveCamera(deviceId = "") {
       return;
     }
     state.cameraStream = stream;
+    stream.getVideoTracks().forEach((track) => {
+      track.addEventListener("ended", () => {
+        if (token !== state.cameraToken || state.manualStage !== "camera") return;
+        stopCamera();
+        state.manualStage = "camera-error";
+        state.scanError = "The camera stopped unexpectedly. Restart the scan or use manual Pokédex search.";
+        renderScanDialog();
+      }, { once: true });
+    });
     const video = elements.scanContent.querySelector("#live-camera");
     if (!video) {
       stopCamera();
@@ -715,7 +845,12 @@ async function startLiveCamera(deviceId = "") {
       if (cameraSelect) cameraSelect.hidden = true;
     }
     const status = elements.scanContent.querySelector("#camera-status");
-    if (status) status.textContent = "Camera ready. Center the Pokémon in the frame, then capture.";
+    if (status) {
+      status.textContent = recognitionEndpoint
+        ? "Live scan active. Point the camera at a clear Pokémon image."
+        : "Live camera is ready, but identification is unavailable until a recognition service is configured. Search manually instead.";
+    }
+    if (recognitionEndpoint) scheduleRecognition(token, 0);
   } catch (error) {
     if (token !== state.cameraToken) return;
     stream?.getTracks().forEach((track) => track.stop());
@@ -726,42 +861,20 @@ async function startLiveCamera(deviceId = "") {
   }
 }
 
-async function captureCameraFrame() {
-  const cameraToken = state.cameraToken;
-  const video = elements.scanContent.querySelector("#live-camera");
+async function cameraFrameBlob(video) {
   if (!video?.videoWidth || !video.videoHeight) {
-    const status = elements.scanContent.querySelector("#camera-status");
-    if (status) status.textContent = "The camera is still starting. Wait a moment and try again.";
-    return;
+    return null;
   }
   const scale = Math.min(1, 1600 / video.videoWidth);
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(video.videoWidth * scale);
   canvas.height = Math.round(video.videoHeight * scale);
   const context = canvas.getContext("2d");
-  if (!context) {
-    stopCamera();
-    state.manualStage = "camera-error";
-    state.scanError = "This browser couldn’t capture a camera frame. Try another browser or use manual search.";
-    renderScanDialog();
-    return;
-  }
+  if (!context) throw new Error("This browser couldn’t capture a camera frame.");
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const image = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
-  if (cameraToken !== state.cameraToken || !elements.dialog.open) return;
-  if (!image) {
-    const status = elements.scanContent.querySelector("#camera-status");
-    if (status) status.textContent = "The camera frame couldn’t be saved. Please try capturing it again.";
-    return;
-  }
-  stopCamera();
-  if (state.scanImageUrl) URL.revokeObjectURL(state.scanImageUrl);
-  state.scanFile = new File([image], "camera-capture.jpg", { type: "image/jpeg" });
-  state.scanImageUrl = URL.createObjectURL(image);
-  state.manualStage = "capture-preview";
-  state.scanError = "";
-  state.recognitionResult = null;
-  renderScanDialog();
+  const image = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  if (!image) throw new Error("The camera frame couldn’t be encoded.");
+  return image;
 }
 
 function setScanFile(file) {
@@ -791,35 +904,81 @@ function validateRecognitionResult(data) {
   return { status: data.status, candidates };
 }
 
-async function identifyCapturedFrame() {
-  if (!recognitionEndpoint) {
-    state.scanError = "Identification is unavailable because no recognition endpoint is configured. Search manually below.";
+const RECOGNITION_INTERVAL_MS = 1800;
+const RELIABLE_MATCH_CONFIDENCE = 0.85;
+
+function setCameraStatus(message, isError = false) {
+  const status = elements.scanContent.querySelector("#camera-status");
+  if (!status) return;
+  if (status.textContent === message && status.classList.contains("camera-status-error") === isError) return;
+  status.textContent = message;
+  status.classList.toggle("camera-status-error", isError);
+}
+
+function scheduleRecognition(token, delay = RECOGNITION_INTERVAL_MS) {
+  if (state.recognitionTimer) window.clearTimeout(state.recognitionTimer);
+  if (token !== state.cameraToken || !state.cameraStream || state.manualStage !== "camera") return;
+  state.recognitionTimer = window.setTimeout(() => {
+    state.recognitionTimer = null;
+    analyzeLiveFrame(token);
+  }, delay);
+}
+
+function openRecognizedPokemon(id) {
+  const pokemon = state.species.find((entry) => entry.id === id);
+  if (!pokemon) {
+    state.scanError = "The service returned a Pokémon that isn’t in this Pokédex. Search manually instead.";
+    state.manualStage = "result";
     renderScanDialog();
     return;
   }
-  if (!state.scanFile) return;
-  let endpointUrl;
-  try {
-    endpointUrl = new URL(recognitionEndpoint, location.href);
-  } catch {
-    state.scanError = "The configured recognition endpoint URL is invalid. Check recognition-config.js.";
-    renderScanDialog();
-    return;
+  stopNarration();
+  closeScanDialog();
+  const name = normalizePokemonName(pokemon.name);
+  state.autoNarratePokemonId = id;
+  state.autoNarrationAnnouncement = `Pokémon found: ${name}. Opening its Pokédex entry.`;
+  elements.announcer.textContent = state.autoNarrationAnnouncement;
+  openDetails(id);
+}
+
+function displayRecognitionResult(result) {
+  const top = result.candidates[0];
+  if (result.status === "no_match") {
+    state.recognitionFailures = 0;
+    setCameraStatus("Point the camera at a clear Pokémon image. The scan will keep checking quietly.");
+    return false;
   }
-  if (endpointUrl.protocol !== "https:" && endpointUrl.origin !== location.origin) {
-    state.scanError = "The recognition endpoint must use HTTPS or the same origin as this site.";
-    renderScanDialog();
-    return;
+  if (result.status === "match" && top.confidence >= RELIABLE_MATCH_CONFIDENCE) {
+    openRecognizedPokemon(top.id);
+    return true;
   }
-  state.manualStage = "identifying";
+  stopCamera();
+  state.recognitionResult = { status: "uncertain", candidates: result.candidates };
+  state.manualStage = "result";
   state.scanError = "";
   renderScanDialog();
+  elements.scanContent.querySelector("[data-result-pokemon]")?.focus();
+  elements.announcer.textContent = "The scan found possible Pokémon matches. Choose the one you see to open its Pokédex entry.";
+  return true;
+}
+
+async function analyzeLiveFrame(token) {
+  if (token !== state.cameraToken || !state.cameraStream || state.manualStage !== "camera") return;
+  const recognitionEndpoint = configuredRecognitionEndpoint();
+  if (!recognitionEndpoint) {
+    setCameraStatus("Live identification is unavailable until a real recognition service is configured. Search manually instead.");
+    return;
+  }
+  const video = elements.scanContent.querySelector("#live-camera");
+  if (!video) return;
   const controller = new AbortController();
   state.recognitionAbortController = controller;
-  const timeout = window.setTimeout(() => controller.abort(), 45000);
+  const timeout = window.setTimeout(() => controller.abort(), 12000);
   try {
+    const image = await cameraFrameBlob(video);
+    if (token !== state.cameraToken || !image) return;
     const form = new FormData();
-    form.append("image", state.scanFile, state.scanFile.name);
+    form.append("image", image, "live-camera-frame.jpg");
     const response = await fetch(recognitionEndpoint, {
       method: "POST",
       headers: { Accept: "application/json" },
@@ -828,58 +987,59 @@ async function identifyCapturedFrame() {
     });
     if (!response.ok) throw new Error(`Recognition service returned HTTP ${response.status}.`);
     const result = validateRecognitionResult(await response.json());
-    if (state.recognitionAbortController !== controller || !elements.dialog.open) return;
-    state.recognitionResult = result;
-    state.manualStage = "result";
-    renderScanDialog();
-    const best = result.candidates[0];
-    const name = state.species.find((entry) => entry.id === best?.id)?.name || "Pokémon";
-    elements.announcer.textContent = result.status === "no_match"
-      ? "No Pokémon detected. Try again or search manually."
-      : `Identification complete. Best match: ${normalizePokemonName(name)}.`;
+    if (token !== state.cameraToken || !elements.dialog.open) return;
+    state.recognitionFailures = 0;
+    if (displayRecognitionResult(result)) return;
   } catch (error) {
-    if (state.recognitionAbortController !== controller || !elements.dialog.open) return;
-    state.manualStage = "capture-preview";
-    state.scanError = error.name === "AbortError"
-      ? "The recognition request timed out. Check the service and try again."
-      : `We couldn’t identify this image. ${error.message} Please retry or search manually.`;
-    renderScanDialog();
+    if (token !== state.cameraToken) return;
+    state.recognitionFailures++;
+    const reason = error.name === "AbortError"
+      ? "The recognition request timed out."
+      : `The recognition service couldn’t analyze this frame. ${error.message}.`;
+    const retry = state.recognitionFailures >= 3
+      ? " The service has failed several times; check its connection or use manual search."
+      : " Retrying automatically.";
+    setCameraStatus(`${reason}${retry}`, true);
   } finally {
     window.clearTimeout(timeout);
     if (state.recognitionAbortController === controller) state.recognitionAbortController = null;
+    if (token === state.cameraToken && state.manualStage === "camera") {
+      scheduleRecognition(token, state.recognitionFailures ? 3500 : RECOGNITION_INTERVAL_MS);
+    }
   }
 }
 
 function renderScanDialog() {
   const close = '<button class="icon-button dialog-close" type="button" aria-label="Close photo lookup">×</button>';
   const error = state.scanError ? `<p class="scan-error" role="alert">${escapeHtml(state.scanError)}</p>` : "";
+  const hasRecognitionService = Boolean(configuredRecognitionEndpoint());
   if (state.manualStage === "start") {
     elements.scanContent.innerHTML = `
       <div class="dialog-heading-row"><h2 id="scan-title">Scan a Pokémon.</h2>${close}</div>
-      <p class="dialog-description">Camera access lets this page show a live preview and capture one frame. Your camera stays off until you start it. ${recognitionEndpoint ? "The frame is sent to the configured recognition service only if you choose Identify Pokémon." : "Identification is unavailable until a recognition service is configured."}</p>
+      <p class="dialog-description">The live scanner needs camera access to view what your camera sees. Your browser will ask before the camera starts. ${hasRecognitionService ? "It checks frames automatically while scanning; camera images are sent only to your configured recognition service." : "Live identification is unavailable until a real recognition service is configured. Manual Pokédex search is still ready."}</p>
       ${error}
       <div class="retry-row">
-        <button class="button button-orange" id="start-camera" type="button">Start camera</button>
+        <button class="button button-orange" id="start-camera" type="button">Start live scan</button>
         <button class="button button-outline" id="open-manual" type="button">Search manually</button>
       </div>
       <label class="upload-option upload-file-option"><span aria-hidden="true">↥</span><strong>Choose a photo instead</strong><small>Browse your device</small>
           <input id="upload-file" type="file" accept="image/*" aria-label="Choose an image from your device" />
       </label>
-      <p class="privacy-note">Camera permission is handled by your browser. Captured frames are sent only after you choose identification and only to your configured endpoint.</p>`;
+      <p class="privacy-note">The scanner can identify only what is visible to the camera—not photos stored elsewhere on your device.</p>`;
   } else if (state.manualStage === "camera") {
     elements.scanContent.innerHTML = `
       <div class="dialog-heading-row"><h2 id="scan-title">Center the Pokémon.</h2>${close}</div>
-      <p class="dialog-description">Live preview · choose a camera if more than one is available.</p>
-      <div class="live-camera-frame"><video id="live-camera" autoplay muted playsinline aria-label="Live camera preview"></video></div>
+      <p class="dialog-description">Live preview · the rear camera is preferred when available.</p>
+      <div class="live-camera-frame${hasRecognitionService ? " scan-active" : ""}"><video id="live-camera" autoplay muted playsinline aria-label="Live camera preview"></video></div>
       <label class="camera-select-label" for="camera-select" hidden>Camera</label>
       <select class="camera-select" id="camera-select" aria-label="Choose camera" hidden></select>
-      <p class="camera-status" id="camera-status" role="status" aria-live="polite">Starting camera…</p>
+      <p class="camera-status" id="camera-status" role="status" aria-live="polite">${hasRecognitionService ? "Starting camera and live scan…" : "Starting camera… identification is unavailable until a recognition service is configured."}</p>
       ${error}
       <div class="preview-actions">
-        <button class="button button-outline" id="stop-camera" type="button">Stop camera</button>
-        <button class="button button-orange" id="capture-frame" type="button">Capture frame</button>
+        <button class="button button-outline" id="stop-camera" type="button">Stop live scan</button>
+        <button class="button button-dark" id="open-manual" type="button">Search manually</button>
       </div>
-      <div class="retry-row"><button class="button button-outline" id="open-manual" type="button">Search manually instead</button></div>`;
+      <p class="privacy-note">No repeated “not found” alerts. Point the camera at a clear Pokémon image.</p>`;
   } else if (state.manualStage === "camera-stopped" || state.manualStage === "camera-error") {
     const unavailable = state.manualStage === "camera-error";
     elements.scanContent.innerHTML = `
@@ -887,34 +1047,23 @@ function renderScanDialog() {
       <p class="dialog-description">${unavailable ? "Retry camera access, choose a photo, or continue with Pokédex search." : "The camera is no longer active. Restart it or search manually."}</p>
       ${error}
       <div class="retry-row">
-        <button class="button button-orange" id="retry-camera" type="button">${unavailable ? "Retry camera" : "Restart camera"}</button>
+        <button class="button button-orange" id="retry-camera" type="button">${unavailable ? "Retry live scan" : "Restart live scan"}</button>
         <button class="button button-outline" id="open-manual" type="button">Search manually</button>
       </div>
       ${unavailable ? `<label class="upload-option upload-file-option"><span aria-hidden="true">↥</span><strong>Choose a photo instead</strong><small>Browse your device</small>
         <input id="upload-file" type="file" accept="image/*" aria-label="Choose an image from your device" />
       </label>` : ""}`;
-  } else if (state.manualStage === "preview" || state.manualStage === "capture-preview") {
-    const cameraCapture = state.manualStage === "capture-preview";
+  } else if (state.manualStage === "preview") {
     elements.scanContent.innerHTML = `
-      <div class="dialog-heading-row"><h2 id="scan-title">${cameraCapture ? "Frame captured." : "Photo ready?"}</h2>${close}</div>
-      <p class="dialog-description">${cameraCapture ? "Review the frame before continuing." : escapeHtml(state.scanFile?.name || "Selected photo")}</p>
+      <div class="dialog-heading-row"><h2 id="scan-title">Photo ready?</h2>${close}</div>
+      <p class="dialog-description">${escapeHtml(state.scanFile?.name || "Selected photo")}</p>
       <div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Preview of your selected Pokémon photo" /></div>
-      ${cameraCapture
-        ? `<div class="recognition-note"><strong>${recognitionEndpoint ? "Ready to identify:" : "Identification unavailable:"}</strong> ${recognitionEndpoint ? "Choose Identify Pokémon to send this frame to your configured server-side service." : "No recognition endpoint is configured, so this frame has not been analyzed."}</div>`
-        : '<div class="recognition-note"><strong>Manual photo lookup:</strong> This selected image is not analyzed automatically.</div>'}
+      <div class="recognition-note"><strong>Manual photo lookup:</strong> This selected image is not analyzed automatically.</div>
       ${error}
       <div class="preview-actions">
-        <button class="button button-outline" id="retake-photo" type="button">${cameraCapture ? "Rescan" : "Choose another"}</button>
-        ${cameraCapture && recognitionEndpoint
-          ? '<button class="button button-orange" id="identify-frame" type="button">Identify Pokémon</button>'
-          : '<button class="button button-orange" id="continue-manual" type="button">Search manually</button>'}
+        <button class="button button-outline" id="retake-photo" type="button">Choose another</button>
+        <button class="button button-orange" id="continue-manual" type="button">Search manually</button>
       </div>`;
-  } else if (state.manualStage === "identifying") {
-    elements.scanContent.innerHTML = `
-      <div class="dialog-heading-row"><h2 id="scan-title">Identifying…</h2>${close}</div>
-      <div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Captured Pokémon frame being analyzed" /></div>
-      <div class="loading-state" role="status"><span class="loading-spinner" aria-hidden="true"></span><span>Checking with the configured recognition service…</span></div>
-      <button class="button button-outline" id="cancel-identification" type="button">Cancel</button>`;
   } else if (state.manualStage === "result") {
     const result = state.recognitionResult;
     const top = result?.candidates[0];
@@ -927,15 +1076,14 @@ function renderScanDialog() {
         <img src="${speciesArtwork(candidate.id)}" alt="" loading="lazy" />
         <div><strong>${index === 0 ? "Best match · " : "Alternative · "}${escapeHtml(normalizePokemonName(species.name))}</strong>
           <small>${displayNumber(candidate.id)} · ${Math.round(candidate.confidence * 100)}% confidence estimate</small></div>
-        <button class="button button-dark" type="button" data-result-pokemon="${candidate.id}">Open entry</button>
+        <button class="button button-dark" type="button" data-result-pokemon="${candidate.id}">Choose ${escapeHtml(normalizePokemonName(species.name))}</button>
       </div>`;
     }).join("");
     elements.scanContent.innerHTML = `
       <div class="dialog-heading-row"><h2 id="scan-title">${result?.status === "no_match" ? "No Pokémon detected." : lowConfidence ? "Possible matches." : "Pokémon identified."}</h2>${close}</div>
-      <div class="preview-frame"><img src="${escapeHtml(state.scanImageUrl)}" alt="Captured Pokémon frame" /></div>
       ${result?.status === "no_match"
         ? '<div class="recognition-note"><strong>No match returned:</strong> The service did not detect a Pokémon. Try better lighting and a clearer subject, or search manually.</div>'
-        : `<div class="recognition-note"><strong>${lowConfidence ? "Uncertain result:" : "Best match:"}</strong> ${lowConfidence ? "Review these alternatives before opening an entry." : "Confidence is an estimate supplied by the configured recognition service."}</div><div class="recognition-candidates">${candidateRows}</div>`}
+        : `<div class="recognition-note"><strong>${lowConfidence ? "Uncertain result:" : "Best match:"}</strong> ${lowConfidence ? "Which Pokémon do you see? Choose a candidate to open its Pokédex entry." : "Confidence is an estimate supplied by the configured recognition service."}</div><div class="recognition-candidates">${candidateRows}</div>`}
       <div class="retry-row">
         <button class="button button-outline" id="retake-photo" type="button">Rescan</button>
         <button class="button button-orange" id="open-manual" type="button">Search manually</button>
@@ -1019,16 +1167,8 @@ function renderScanDialog() {
     state.manualStage = "camera-stopped";
     renderScanDialog();
   });
-  elements.scanContent.querySelector("#capture-frame")?.addEventListener("click", captureCameraFrame);
   elements.scanContent.querySelector("#camera-select")?.addEventListener("change", (event) => {
     if (event.target.value) startLiveCamera(event.target.value);
-  });
-  elements.scanContent.querySelector("#identify-frame")?.addEventListener("click", identifyCapturedFrame);
-  elements.scanContent.querySelector("#cancel-identification")?.addEventListener("click", () => {
-    state.recognitionAbortController?.abort();
-    state.recognitionAbortController = null;
-    state.manualStage = "capture-preview";
-    renderScanDialog();
   });
   elements.scanContent.querySelector("#open-manual")?.addEventListener("click", () => {
     stopCamera();
@@ -1047,8 +1187,7 @@ function renderScanDialog() {
   elements.scanContent.querySelectorAll("[data-result-pokemon]").forEach((button) => {
     button.addEventListener("click", () => {
       const id = Number(button.dataset.resultPokemon);
-      closeScanDialog();
-      openDetails(id);
+      openRecognizedPokemon(id);
     });
   });
 }
@@ -1062,6 +1201,7 @@ function closeScanDialog(browse = false) {
   state.scanImageUrl = null;
   state.scanFile = null;
   if (browse) {
+    if (state.detailView) closeDetails();
     elements.search.value = state.manualSearch;
     elements.search.dispatchEvent(new Event("input"));
     document.querySelector("#explore").scrollIntoView({ behavior: "smooth" });
@@ -1109,6 +1249,7 @@ function setupEvents() {
   });
   window.addEventListener("pagehide", () => {
     stopCamera();
+    stopNarration(false);
     state.recognitionAbortController?.abort();
   });
   window.addEventListener("popstate", () => {
