@@ -2,90 +2,89 @@
 
 An unofficial, responsive Pokémon field guide made by **Deep Datta Chaudhury**. Search all 1,025 National Pokédex species, filter by type and generation, and open detailed entries for artwork, descriptions, stats, abilities, evolutions, habitat, and type matchups.
 
-This is a static HTML, CSS, and vanilla JavaScript site. It has **no framework, build step, or package installation**. Pokémon data is requested from [PokéAPI](https://pokeapi.co/); official Pokémon artwork is displayed using artwork served by the [PokéAPI sprites project](https://github.com/PokeAPI/sprites). Pokémon, their names, and their artwork belong to their respective rights holders. This unofficial fan project is not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc., or The Pokémon Company.
+The site uses static HTML, CSS, and vanilla JavaScript, plus a Netlify Function for live image recognition. Pokémon data comes from [PokéAPI](https://pokeapi.co/); artwork is served by the [PokéAPI sprites project](https://github.com/PokeAPI/sprites). Pokémon and artwork belong to their respective rights holders. This unofficial fan project is not affiliated with or endorsed by Nintendo, Creatures Inc., GAME FREAK inc., or The Pokémon Company.
 
-The live camera interface is implemented. **Automatic identification and automatic scan-to-entry narration remain unavailable until you supply a real server-side vision endpoint and configure its URL.** No model, recognition provider, backend adapter, account, or API key is included. Until configured, the camera preview says identification is unavailable; manual Pokédex search remains usable, and the app does not invent matches or confidence scores.
+## Run locally
 
-## Run and test locally
-
-Open `index.html` in a modern desktop browser while connected to the internet, or serve the site over localhost:
+For the static Pokédex, serve this folder over localhost:
 
 ```powershell
-cd path\to\C-Programming(IITG)\Pokedex
+cd "C:\path\to\C-Programming(IITG)\Pokedex"
 python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Then open `http://localhost:8000`. PokéAPI and artwork require an internet connection. `localhost` is considered secure by current browsers and supports the live camera permission flow. The camera preview requires HTTPS or localhost; opening the site from another device at a plain `http://192.168...` address may not permit live camera access.
+Open `http://localhost:8000`. PokéAPI and artwork require internet access. `localhost` is treated as secure for camera access by modern browsers.
 
-## Try the camera from a phone on your Wi-Fi
+For the serverless function, install/use the [Netlify CLI](https://docs.netlify.com/build/functions/get-started/) and run it from this folder:
 
-For the live camera on a phone, use the site's HTTPS address after publishing. Open the site, tap **Scan Pokémon**, read the camera explanation, tap **Start live scan**, and allow access in the browser prompt. The app prefers the rear-facing camera and offers a selector if multiple cameras are available. If a real recognition endpoint is configured, the scanner sends a reduced-size frame every 1.8 seconds (waiting for each response before the next request). A reliable match (service status `match` and confidence at least 85%) stops the scan, opens the Pokédex entry, and starts browser narration. A low-confidence result pauses the camera and asks you to choose a match. With no recognition service, camera preview works but identification remains unavailable. Stop/close the scanner or leave the page to release camera tracks. On localhost, test from the computer; a plain HTTP local-network address is not a reliable camera test.
+```powershell
+cd "C:\path\to\C-Programming(IITG)\Pokedex"
+npx netlify-cli dev
+```
 
-## Publish the site (beginner-friendly: Netlify Drop)
+Configure `OPENAI_API_KEY` in a local `.env` file (ignored by this folder's `.gitignore`) or in the shell before starting the CLI. Never put the key in browser files or commit it. The function is served at `/api/identify`.
 
-Netlify is a simple static host for this project: it serves the existing files, provides HTTPS, and does not need a build command.
+## Live recognition, privacy, and accuracy
 
-1. Visit [Netlify Drop](https://app.netlify.com/drop), sign in to your own Netlify account, and deploy the **contents of this `Pokedex` folder** (including `recognition-config.js`). Make sure `index.html` is at the published site root, not one directory deeper. Netlify will give you a public HTTPS URL; write down the exact hostname. Alternatively, connect this GitHub repository to Netlify, set `Pokedex` as the base directory and `.` as the publish directory relative to that base, and leave the build command blank.
-2. If you want a custom domain, connect a domain you own through your hosting provider and make sure its HTTPS certificate is ready. Otherwise use the HTTPS Netlify hostname assigned to your site.
-3. The canonical URL, Open Graph URL, JSON-LD metadata, `robots.txt`, and `sitemap.xml` are configured for `https://kaleidoscopic-custard-2a6567.netlify.app/`. If you connect a custom domain, update those URLs to your final canonical HTTPS address (preserving the trailing `/` on the homepage URLs) before redeploying.
-4. Redeploy the updated folder to the same Netlify site: open its **Deploys** page and drag in the updated site files, keeping `index.html` at the published root. A Git-connected site can instead deploy the update when you push your changes.
-5. Open the final HTTPS URL and verify the home page, Pokémon search and detail pages, filters, camera permission and preview, photo upload, About section, and footer. Check that `/robots.txt` and `/sitemap.xml` use your real hostname and search the deployed files for any remaining `.example` placeholders.
+The scanner calls OpenAI's **GPT-4.1 mini** vision model (`gpt-4.1-mini`) through `netlify/functions/identify.mjs`. The model receives a reduced JPEG still from the live camera and returns up to three National Pokédex ID candidates with model-estimated confidence. PokéAPI remains the source of entry details. The app opens and narrates automatically at 85% confidence; lower-confidence candidates pause scanning for the user to choose. A no-match response leaves the scan running quietly.
 
-Netlify Drop publishes only the static site files; it does not create a recognition backend. The camera works on the HTTPS site, but identification stays clearly unavailable until you host and connect the separate server-side endpoint described below.
+The camera stream stays in the browser. When the user accepts the disclosure and starts scanning, sampled frames are sent to this site's Netlify Function, then to OpenAI. Only the live camera frames are sent; a selected photo remains local for manual lookup. Frames are not stored by this app. OpenAI states that API content is not used to train models by default, but abuse-monitoring logs may retain prompts, images, and responses for up to 30 days. Eligible organizations can apply for modified abuse monitoring or zero data retention; approval is not automatic. Do not scan people, documents, or sensitive information. See [OpenAI API data controls](https://developers.openai.com/api/docs/guides/your-data).
 
-This workflow publishes the files but does **not** create an account or publish anything automatically for you.
+The reported confidence is a model estimate, not a calibrated probability or accuracy guarantee. Test printed Pokémon images, screen-displayed artwork, multiple species, difficult lighting, and non-Pokémon scenes before relying on results. Recognition has not been tested against real Pokémon images as part of this project change.
 
-## Google Search Console and indexing
+### Cost and account requirements
 
-Search metadata, social-sharing previews, a canonical URL, `robots.txt`, an XML sitemap, and `WebSite` structured data are included. Once the real HTTPS site is live:
+The current [GPT-4.1 mini model page](https://developers.openai.com/api/docs/models/gpt-4.1-mini) lists **$0.40 per million input tokens** and **$1.60 per million output tokens**. Image input is billed as input tokens; the processed token count depends on image resolution/detail. Each frame also includes prompt tokens, so cost depends on scan duration, frame size, and response usage. At five seconds per frame the client sends at most 12 frames per minute while connected; stopping scanning cancels the in-flight browser request and prevents future frames. The API account may still process a request already received before cancellation. These code limits are not a spending cap.
 
-1. Open [Google Search Console](https://search.google.com/search-console/) and add a **URL-prefix property** for your exact deployed HTTPS URL (or a Domain property if you control the domain and can add its DNS verification record).
-2. Complete Google's ownership verification. With a static site, you can upload the HTML verification file to the published root and redeploy; alternatively use the verification method Google offers for your hosting/domain.
-3. In Search Console, open **Sitemaps**, enter `sitemap.xml`, and submit it.
-4. Use **URL Inspection** on the homepage and select **Request indexing**.
+You need an OpenAI API Platform organization/project and a project API key. ChatGPT Plus does not include API usage; API billing/payment setup may be required. Before sharing the site, review current pricing and data handling, enable usage notifications/limits in the OpenAI project, and consider whether the provider's default 30-day abuse-monitoring retention is acceptable. No account or API key is included, and no provider request is made until a key is configured.
 
-Google must be able to fetch the published site, its sitemap, and its metadata. Search crawling and indexing take time; indexing and ranking are controlled by Google and are **not guaranteed**. The author name is presented accurately in the site's title, description, About section, footer, and structured data, without promising a particular search result or ranking. The site is a client-rendered Pokédex: individual Pokémon details are reached through in-page hash links, so the sitemap lists the single public homepage.
+### Add the key to Netlify
 
-## Recognition endpoint setup
+1. In the OpenAI API Platform, create a project API key and configure the project's usage limits/alerts. Do not paste it into chat, commit it, or add it to `app.js` or `recognition-config.js`.
+2. In Netlify, open **Site configuration → Environment variables → Add a variable**. Set the name to `OPENAI_API_KEY`, paste the key as its secret value, and make it available to Functions.
+3. Save the variable and trigger a new deploy so the function receives it. If the variable is absent or invalid, the function returns an explicit configuration error; it never returns the secret to the browser.
 
-The client integration is ready, but a real vision service and its server adapter still need to be supplied. Do not put provider keys in `app.js`, `recognition-config.js`, or any other frontend file.
+The function validates JPEG input and size (maximum 1.5 MB), times out its provider request after 10 seconds, returns explicit errors for provider failures and rate limits, and permits up to 12 requests per IP per minute with one active request per IP in each warm function instance. Netlify may run multiple instances, so this in-memory throttle is best-effort rather than a global abuse limit. A provider-side usage limit is still necessary.
 
-1. Host a server-side adapter at an HTTPS URL (or same-origin route such as `/api/identify`). Choose and configure a vision provider that can recognize Pokémon. Configure these environment variables **on the backend host**, not in this repository:
-   - `POKEDEX_VISION_API_URL` — the provider's vision API endpoint.
-   - `POKEDEX_VISION_API_KEY` — the provider credential; keep it secret.
-   - `POKEDEX_VISION_MODEL` — the provider's selected vision model identifier.
-   The backend implementation must read these settings, securely call the selected provider, and never return the key to the browser. There is no backend or provider-specific adapter included yet, so these settings have no effect until that server code is implemented and deployed. Follow the selected provider's current documentation for exact credentials, model availability, usage costs, and image policies.
-2. Configure the public endpoint URL in `recognition-config.js`:
-   ```js
-   window.POKEDEX_RECOGNITION_ENDPOINT = "https://YOUR-SERVER.example/api/identify";
-   ```
-   For a same-origin server route, use `"/api/identify"`. The browser makes a `POST` with `multipart/form-data` field `image` containing one JPEG camera frame and requests a JSON response. While live scanning is on, frames are sent at the cadence above. Uploaded photos remain local and use manual search. Cross-origin endpoints must allow this site's origin through CORS. Use HTTPS for remote endpoints.
-3. Have the server return this contract (confidence is a number from `0` to `1`; candidates should be sorted by confidence and use National Pokédex IDs 1–1025):
-   ```json
-   {
-     "status": "uncertain",
-     "candidates": [
-       { "id": 25, "confidence": 0.72 },
-       { "id": 26, "confidence": 0.18 }
-     ]
-   }
-   ```
-   `status` must be `"match"`, `"uncertain"`, or `"no_match"`. For no Pokémon detected, return `{"status":"no_match","candidates":[]}`. No-match responses are handled quietly while scan guidance remains visible. An `"uncertain"` response or a `"match"` below 85% pauses scanning and shows candidate choices. A `"match"` at or above 85% opens its entry automatically. Confidence is a provider estimate, not a guarantee; tune thresholds only alongside real model validation.
-4. Validate image type and size on the server, limit request size and rate, return useful non-2xx errors, and review the provider's data retention and privacy terms. While live scanning is active, the camera feed remains local but sampled frames are sent to the configured endpoint. Stopping/closing the scanner stops camera tracks and aborts an in-flight request. Uploaded photos stay local and use manual search. Without endpoint configuration, no frame is uploaded or analyzed.
-5. For local integration, run the front end at `http://localhost:8000` as above and run your backend separately. Set the endpoint to its HTTPS URL or a same-origin proxy. For production, deploy the static front end and backend separately (or add a serverless function to your hosting project), set the three server environment variables in the host's function/service settings, configure `recognition-config.js`, then redeploy. Netlify Drop alone cannot deploy a serverless function.
+## Publish or redeploy on Netlify
 
-Until an endpoint returns valid responses and is tested with real printed images, screen-displayed images, and non-Pokémon scenes, identification remains unavailable; the camera preview and manual search still work. A failed request, unsupported response, timeout, or no-match result never becomes a fabricated identification.
+This project includes a serverless function; **Netlify Drop does not deploy it**. Use the connected Git repository or Netlify CLI.
+
+1. In the Netlify site's build settings, set **Base directory** to `Pokedex` and leave the build command blank. `netlify.toml` sets `.` as the publish directory and `netlify/functions` as the functions directory.
+2. Add `OPENAI_API_KEY` in Netlify's environment-variable settings as described above.
+3. Push the updated files to the branch connected to Netlify, or deploy using Netlify CLI. Netlify builds the static site and function together. Redeploy after changing function code or the secret.
+4. Use the existing HTTPS Netlify URL or connect a custom domain. If the domain changes, update the canonical URL, social metadata, structured data, `robots.txt`, and `sitemap.xml`.
+5. Verify the site, camera disclosure, preview, manual search, and `/api/identify`. Without a key, the function should return a helpful setup error. A successful function response alone does not prove recognition accuracy.
+
+## Test on a phone
+
+After the Netlify deploy finishes and HTTPS is ready:
+
+1. Open the site's HTTPS address in Safari or Chrome on your phone.
+2. Tap **Scan Pokémon** and read the camera/OpenAI disclosure. Tap **I understand — start live scan** and allow camera access.
+3. Hold a clear printed Pokémon image or another screen in front of the camera. Keep it centered and well-lit. The app samples a frame every five seconds; it does not take a photo or ask you to choose a Pokémon.
+4. At a high-confidence result, the app opens the PokéAPI entry and starts browser narration. For uncertain candidates, tap the Pokémon you see. No-match responses keep scanning quietly.
+5. Use **Stop live scan** or close the scanner to release the camera and stop sending further frames. Use **Search manually** as a fallback. Choosing a photo previews it locally; it does not send it to OpenAI or identify it.
+
+A public phone test requires the live Netlify function, a valid secret key, provider API access, and an internet connection. For local camera preview, use `localhost`; a plain `http://192.168...` address usually cannot access the camera. The site's HTTPS URL works on a phone.
+
+## Google Search Console
+
+The site includes search/social metadata, canonical URL, `robots.txt`, sitemap, and `WebSite` structured data. Once the HTTPS site is live, add the exact URL as a [Google Search Console](https://search.google.com/search-console/) URL-prefix property, verify ownership, submit `sitemap.xml`, and request indexing for the homepage. A verification HTML file is included in the project; its presence does not prove that the Search Console property is verified. Google controls whether and when it indexes the site.
 
 ## Voice narration
 
-After a reliable match—or after you choose an uncertain candidate—the Pokédex entry opens and the browser announces **“Pokémon found: [name]. Opening its Pokédex entry.”** Browser speech synthesis then reads a concise summary with the name, National Pokédex number, generation, category, types, description, abilities, base stats, evolution family, habitat, and available type matchups. The entry also includes a readable text version. Use **Replay narration**, **Stop narration**, **Mute voice**, and **Scan another Pokémon** controls. Voice playback depends on browser/device speech-synthesis support; when unavailable or muted, the same summary remains visible as text. The voice uses the browser’s selected/default voice and does not imitate a specific person.
+After a reliable match—or after the user chooses an uncertain candidate—the Pokédex announces **“Pokémon found: [name]. Opening its Pokédex entry.”** Browser speech synthesis then reads the Pokémon name, National Pokédex number, generation, category, types, description, abilities, base stats, evolution family, habitat, and general type matchups. Entry details are also available as text. Use **Replay narration**, **Stop narration**, **Mute voice**, and **Scan another Pokémon**. Speech depends on browser/device support and uses the browser's selected/default voice.
 
 ## Included files
 
-- `index.html` — accessible site structure, SEO/social metadata, JSON-LD, and About/credits.
-- `styles.css` — responsive visual design, reduced-motion support, and visible keyboard focus.
-- `app.js` — PokéAPI search, filters, offline cache, detail views, live camera scanning, recognition endpoint client, and speech narration.
-- `recognition-config.js` — public recognition endpoint URL only; never place credentials here.
-- `favicon.svg` — original Pokédex-inspired site icon.
-- `robots.txt` and `sitemap.xml` — static-host search-discovery files (update the domain if you use a custom hostname).
-- `_headers` — recommended response headers for Netlify-style static hosts.
+- `index.html` — accessible site structure, metadata, About section, and camera privacy description.
+- `styles.css` — responsive visual design and interaction styling.
+- `app.js` — PokéAPI browsing/details, live-camera scanning, request handling, and speech narration.
+- `recognition-config.js` — same-origin `/api/identify` URL; contains no secret.
+- `netlify.toml` — Netlify publish/function settings and `/api/identify` routing.
+- `netlify/functions/identify.mjs` — server-side OpenAI adapter; reads `OPENAI_API_KEY` from Netlify's runtime environment.
+- `robots.txt` and `sitemap.xml` — search-crawler discovery files.
+- `_headers` — recommended response headers for Netlify-style static hosting.
+- `googlec28463f7239cf81d.html` — Google site-verification file.
+- `favicon.svg` — site icon.

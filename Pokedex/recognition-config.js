@@ -1,4 +1,4 @@
 "use strict";
 
-// Set this to your HTTPS server-side vision endpoint. Never put provider API keys here.
-window.POKEDEX_RECOGNITION_ENDPOINT = "";
+// This same-origin Netlify Function keeps the OpenAI API key server-side.
+window.POKEDEX_RECOGNITION_ENDPOINT = "/api/identify";

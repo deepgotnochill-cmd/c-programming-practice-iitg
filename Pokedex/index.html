@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Explore all 1,025 Pokémon with Deep Datta Chaudhury’s unofficial Pokédex: search every generation, browse detailed entries, and scan with a live camera preview."
+      content="Explore all 1,025 Pokémon with Deep Datta Chaudhury’s unofficial Pokédex: search every generation, browse detailed entries, and identify Pokémon from your live camera."
     />
     <meta name="author" content="Deep Datta Chaudhury" />
     <meta name="robots" content="index,follow,max-image-preview:large" />
@@ -70,7 +70,7 @@
         <div class="hero-copy">
           <span class="eyebrow"><span class="eyebrow-dot"></span> YOUR POCKET-SIZED FIELD GUIDE</span>
           <h1 id="hero-title">Every Pokémon<br />has a <span>story.</span></h1>
-          <p>Meet your next favorite. Search the Pokédex or start with a photo and find your Pokémon.</p>
+          <p>Meet your next favorite. Search the Pokédex or scan a Pokémon picture with your live camera.</p>
           <div class="hero-actions">
             <button class="button button-orange button-large" id="hero-scan" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h3m8 0h3a1 1 0 0 1 1 1v3m0 8v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3m3-4h10m-5-5v10" /></svg>
@@ -157,7 +157,7 @@
         <span class="eyebrow">A FIELD GUIDE, MADE FOR CURIOUS TRAINERS</span>
         <h2 id="about-title">A little more about this Pokédex<span class="heading-period">.</span></h2>
         <p>Made by <strong>Deep Datta Chaudhury</strong>, this independent fan-made field guide makes it easy to explore Pokémon across all nine generations. Search by name or number, browse types, and open an entry for Pokédex descriptions, stats, abilities, evolutions, habitat, and general type matchups.</p>
-        <p>The live camera scanner checks what the camera sees. Pokémon identification is <strong>unavailable until a secure vision-service endpoint is configured</strong>; until then, use manual Pokédex search. When configured, sampled camera frames are sent to that endpoint while scanning; an uploaded photo stays local for manual lookup.</p>
+        <p>The live camera scanner checks what the camera sees. When recognition is configured, reduced camera frames are sent to OpenAI through a server-side Netlify function; the full camera stream stays in your browser. Choosing a photo keeps it local for manual lookup. The scanner cannot access other photos on your device.</p>
       </div>
       <aside class="about-sources" aria-label="Data, artwork, and Pokémon credits">
         <h3>Sources &amp; credits</h3>

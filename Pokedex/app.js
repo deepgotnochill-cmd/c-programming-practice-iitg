@@ -3,6 +3,7 @@
 const API = "https://pokeapi.co/api/v2";
 const PAGE_SIZE = 24;
 const MAX_IMAGE_SIZE = 15 * 1024 * 1024;
+const MAX_CAMERA_FRAME_SIZE = 1.5 * 1024 * 1024;
 const TYPE_NAMES = [
   "normal", "fire", "water", "electric", "grass", "ice", "fighting",
   "poison", "ground", "flying", "psychic", "bug", "rock", "ghost",
@@ -60,6 +61,7 @@ const state = {
   recognitionResult: null,
   recognitionTimer: null,
   recognitionFailures: 0,
+  recognitionPaused: false,
   autoNarratePokemonId: null,
   autoNarrationAnnouncement: "",
   narrationText: "",
@@ -759,6 +761,8 @@ async function startLiveCamera(deviceId = "") {
   stopCamera();
   state.manualStage = "camera";
   state.scanError = "";
+  state.recognitionPaused = false;
+  state.recognitionFailures = 0;
   const recognitionEndpoint = configuredRecognitionEndpoint();
   if (recognitionEndpoint) {
     try {
@@ -865,15 +869,18 @@ async function cameraFrameBlob(video) {
   if (!video?.videoWidth || !video.videoHeight) {
     return null;
   }
-  const scale = Math.min(1, 1600 / video.videoWidth);
+  const scale = Math.min(1, 768 / Math.max(video.videoWidth, video.videoHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(video.videoWidth * scale);
   canvas.height = Math.round(video.videoHeight * scale);
   const context = canvas.getContext("2d");
   if (!context) throw new Error("This browser couldn’t capture a camera frame.");
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const image = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  const image = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72));
   if (!image) throw new Error("The camera frame couldn’t be encoded.");
+  if (image.size > MAX_CAMERA_FRAME_SIZE) {
+    throw new Error("This camera frame is too large to send securely.");
+  }
   return image;
 }
 
@@ -904,7 +911,7 @@ function validateRecognitionResult(data) {
   return { status: data.status, candidates };
 }
 
-const RECOGNITION_INTERVAL_MS = 1800;
+const RECOGNITION_INTERVAL_MS = 5000;
 const RELIABLE_MATCH_CONFIDENCE = 0.85;
 
 function setCameraStatus(message, isError = false) {
@@ -963,7 +970,7 @@ function displayRecognitionResult(result) {
 }
 
 async function analyzeLiveFrame(token) {
-  if (token !== state.cameraToken || !state.cameraStream || state.manualStage !== "camera") return;
+  if (token !== state.cameraToken || !state.cameraStream || state.manualStage !== "camera" || state.recognitionPaused) return;
   const recognitionEndpoint = configuredRecognitionEndpoint();
   if (!recognitionEndpoint) {
     setCameraStatus("Live identification is unavailable until a real recognition service is configured. Search manually instead.");
@@ -974,6 +981,7 @@ async function analyzeLiveFrame(token) {
   const controller = new AbortController();
   state.recognitionAbortController = controller;
   const timeout = window.setTimeout(() => controller.abort(), 12000);
+  let retryDelay = RECOGNITION_INTERVAL_MS;
   try {
     const image = await cameraFrameBlob(video);
     if (token !== state.cameraToken || !image) return;
@@ -985,26 +993,48 @@ async function analyzeLiveFrame(token) {
       body: form,
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`Recognition service returned HTTP ${response.status}.`);
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const error = new Error(errorBody?.error || `Recognition service returned HTTP ${response.status}.`);
+      error.status = response.status;
+      error.code = errorBody?.code;
+      error.retryAfter = response.headers.get("Retry-After");
+      throw error;
+    }
     const result = validateRecognitionResult(await response.json());
     if (token !== state.cameraToken || !elements.dialog.open) return;
     state.recognitionFailures = 0;
     if (displayRecognitionResult(result)) return;
   } catch (error) {
     if (token !== state.cameraToken) return;
+    if (error.status === 503 && ["recognition_not_configured", "provider_credentials_invalid"].includes(error.code)) {
+      state.recognitionPaused = true;
+      setCameraStatus(`${error.message} The camera stays on, but no more frames will be sent. Search manually or try again after the site configuration is fixed.`, true);
+      return;
+    }
+    if (error.status === 429) {
+      const seconds = Number(error.retryAfter);
+      retryDelay = Number.isFinite(seconds) ? Math.min(60, Math.max(1, seconds)) * 1000 : 15000;
+      state.recognitionFailures = 0;
+      setCameraStatus(`The recognition service is rate-limiting requests. Retrying in ${Math.ceil(retryDelay / 1000)} seconds.`, true);
+      return;
+    }
     state.recognitionFailures++;
     const reason = error.name === "AbortError"
       ? "The recognition request timed out."
-      : `The recognition service couldn’t analyze this frame. ${error.message}.`;
+      : error.status >= 500
+        ? `The recognition service is temporarily unavailable. ${error.message}`
+        : `The recognition service couldn’t analyze this frame. ${error.message}`;
     const retry = state.recognitionFailures >= 3
       ? " The service has failed several times; check its connection or use manual search."
       : " Retrying automatically.";
     setCameraStatus(`${reason}${retry}`, true);
+    retryDelay = Math.min(20000, 3000 * (2 ** Math.min(state.recognitionFailures - 1, 3)));
   } finally {
     window.clearTimeout(timeout);
     if (state.recognitionAbortController === controller) state.recognitionAbortController = null;
-    if (token === state.cameraToken && state.manualStage === "camera") {
-      scheduleRecognition(token, state.recognitionFailures ? 3500 : RECOGNITION_INTERVAL_MS);
+    if (token === state.cameraToken && state.manualStage === "camera" && !state.recognitionPaused) {
+      scheduleRecognition(token, state.recognitionFailures ? retryDelay : RECOGNITION_INTERVAL_MS);
     }
   }
 }
@@ -1016,16 +1046,16 @@ function renderScanDialog() {
   if (state.manualStage === "start") {
     elements.scanContent.innerHTML = `
       <div class="dialog-heading-row"><h2 id="scan-title">Scan a Pokémon.</h2>${close}</div>
-      <p class="dialog-description">The live scanner needs camera access to view what your camera sees. Your browser will ask before the camera starts. ${hasRecognitionService ? "It checks frames automatically while scanning; camera images are sent only to your configured recognition service." : "Live identification is unavailable until a real recognition service is configured. Manual Pokédex search is still ready."}</p>
+      <p class="dialog-description">When you start scanning, your live camera stays on this device. A reduced still frame is sent to this site’s Netlify function every five seconds; if recognition is configured, that frame is forwarded to OpenAI for identification. If the service is not configured, the function rejects the request without forwarding it. OpenAI API content is not used to train models by default, but abuse-monitoring logs may retain prompts and images for up to 30 days. Don’t scan people or sensitive information. By continuing, you agree to send these camera frames for recognition. <a href="https://developers.openai.com/api/docs/guides/your-data" target="_blank" rel="noopener noreferrer">OpenAI data controls</a></p>
       ${error}
       <div class="retry-row">
-        <button class="button button-orange" id="start-camera" type="button">Start live scan</button>
+        <button class="button button-orange" id="start-camera" type="button">I understand — start live scan</button>
         <button class="button button-outline" id="open-manual" type="button">Search manually</button>
       </div>
       <label class="upload-option upload-file-option"><span aria-hidden="true">↥</span><strong>Choose a photo instead</strong><small>Browse your device</small>
           <input id="upload-file" type="file" accept="image/*" aria-label="Choose an image from your device" />
       </label>
-      <p class="privacy-note">The scanner can identify only what is visible to the camera—not photos stored elsewhere on your device.</p>`;
+      <p class="privacy-note">Only live camera frames are sent for recognition. The scanner cannot access other photos on your device. Choosing a photo keeps it local for manual lookup.</p>`;
   } else if (state.manualStage === "camera") {
     elements.scanContent.innerHTML = `
       <div class="dialog-heading-row"><h2 id="scan-title">Center the Pokémon.</h2>${close}</div>
@@ -1033,7 +1063,7 @@ function renderScanDialog() {
       <div class="live-camera-frame${hasRecognitionService ? " scan-active" : ""}"><video id="live-camera" autoplay muted playsinline aria-label="Live camera preview"></video></div>
       <label class="camera-select-label" for="camera-select" hidden>Camera</label>
       <select class="camera-select" id="camera-select" aria-label="Choose camera" hidden></select>
-      <p class="camera-status" id="camera-status" role="status" aria-live="polite">${hasRecognitionService ? "Starting camera and live scan…" : "Starting camera… identification is unavailable until a recognition service is configured."}</p>
+      <p class="camera-status" id="camera-status" role="status" aria-live="polite">Starting camera and automatic Pokémon recognition…</p>
       ${error}
       <div class="preview-actions">
         <button class="button button-outline" id="stop-camera" type="button">Stop live scan</button>
