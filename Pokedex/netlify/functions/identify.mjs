@@ -1,6 +1,5 @@
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const MODEL = "gpt-4.1-mini";
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
+const MAX_REQUEST_BYTES = MAX_IMAGE_BYTES + 16_384;
 const RATE_WINDOW_MS = 60_000;
 const MAX_REQUESTS_PER_WINDOW = 12;
 const requestsByIp = new Map();
@@ -97,6 +96,34 @@ function validateCandidates(value, speciesIndex) {
   return candidates;
 }
 
+async function readBoundedBody(request) {
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_REQUEST_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 export default async (request, context) => {
   if (request.method !== "POST") {
     return jsonResponse(405, { error: "Use POST to submit a live camera frame.", code: "method_not_allowed" }, {
@@ -104,11 +131,30 @@ export default async (request, context) => {
     });
   }
 
-  const apiKey = Netlify.env.get("OPENAI_API_KEY");
-  if (!apiKey) {
+  const apiUrl = Netlify.env.get("POKEDEX_VISION_API_URL")?.trim();
+  const apiKey = Netlify.env.get("POKEDEX_VISION_API_KEY")?.trim();
+  const model = Netlify.env.get("POKEDEX_VISION_MODEL")?.trim();
+  if (!apiUrl || !apiKey || !model) {
     return jsonResponse(503, {
-      error: "The recognition service is not configured yet. Add OPENAI_API_KEY to this Netlify site’s environment variables.",
+      error: "The recognition service is not configured. Set POKEDEX_VISION_API_URL, POKEDEX_VISION_API_KEY, and POKEDEX_VISION_MODEL in the server environment.",
       code: "recognition_not_configured",
+    });
+  }
+  let providerUrl;
+  try {
+    providerUrl = new URL(apiUrl);
+  } catch {
+    return jsonResponse(503, {
+      error: "The recognition service URL is invalid. Check POKEDEX_VISION_API_URL in the server environment.",
+      code: "recognition_configuration_invalid",
+    });
+  }
+  if (providerUrl.protocol !== "https:" || providerUrl.hostname !== "api.openai.com"
+    || providerUrl.pathname !== "/v1/chat/completions" || providerUrl.username || providerUrl.password
+    || providerUrl.search || providerUrl.hash || !/^[a-zA-Z0-9._-]{1,128}$/.test(model)) {
+    return jsonResponse(503, {
+      error: "Recognition must use the official HTTPS OpenAI Chat Completions endpoint and a valid model name. Check the server environment settings.",
+      code: "recognition_configuration_invalid",
     });
   }
 
@@ -131,14 +177,27 @@ export default async (request, context) => {
   activeIps.add(ip);
   try {
     const contentLength = Number(request.headers.get("Content-Length"));
-    if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_BYTES + 16_384) {
+    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
       return jsonResponse(413, { error: "Camera frame is too large. Try scanning again.", code: "image_too_large" });
+    }
+    if (!request.headers.get("Content-Type")?.toLowerCase().startsWith("multipart/form-data;")) {
+      return jsonResponse(400, { error: "Send the camera frame as multipart form data.", code: "invalid_form" });
     }
 
     let image;
     try {
-      const form = await request.formData();
-      image = form.get("image");
+      const body = await readBoundedBody(request);
+      if (!body) {
+        return jsonResponse(413, { error: "Camera frame is too large. Try scanning again.", code: "image_too_large" });
+      }
+      const headers = new Headers(request.headers);
+      headers.delete("content-length");
+      const form = await new Request(request.url, { method: "POST", headers, body }).formData();
+      const entries = [...form.entries()];
+      if (entries.length !== 1 || entries[0][0] !== "image") {
+        return jsonResponse(400, { error: "Send exactly one JPEG camera frame.", code: "invalid_form" });
+      }
+      image = entries[0][1];
     } catch {
       return jsonResponse(400, { error: "The camera frame could not be read.", code: "invalid_form" });
     }
@@ -152,6 +211,9 @@ export default async (request, context) => {
     const timeout = AbortSignal.timeout(10_000);
     const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
     const bytes = Buffer.from(await image.arrayBuffer());
+    if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) {
+      return jsonResponse(400, { error: "The uploaded frame is not a valid JPEG image.", code: "invalid_image" });
+    }
     const prompt = [
       "Identify only Pokémon that are visibly depicted in this camera image, including printed artwork and images on screens.",
       "Return up to three distinct, ranked candidates using each species' canonical English PokéAPI name slug (for example, pikachu or mr-mime).",
@@ -159,14 +221,14 @@ export default async (request, context) => {
       "Return an empty candidates array when no Pokémon is visible or you cannot make a plausible identification.",
       "Do not guess from unrelated objects, text, or context. Use the base species name for alternate artwork or forms.",
     ].join(" ");
-    const response = await fetch(OPENAI_API_URL, {
+    const response = await fetch(providerUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         temperature: 0,
         max_completion_tokens: 160,
         response_format: {
@@ -205,7 +267,7 @@ export default async (request, context) => {
     }
     if (response.status === 401 || response.status === 403) {
       return jsonResponse(503, {
-        error: "The vision provider rejected its API key. Check OPENAI_API_KEY in Netlify environment variables.",
+        error: "The vision provider rejected its API key. Check POKEDEX_VISION_API_KEY in Netlify environment variables.",
         code: "provider_credentials_invalid",
       });
     }

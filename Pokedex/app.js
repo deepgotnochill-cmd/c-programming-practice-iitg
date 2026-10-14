@@ -1007,7 +1007,16 @@ async function analyzeLiveFrame(token) {
     if (displayRecognitionResult(result)) return;
   } catch (error) {
     if (token !== state.cameraToken) return;
-    if (error.status === 503 && ["recognition_not_configured", "provider_credentials_invalid"].includes(error.code)) {
+    if (error.status === 404) {
+      state.recognitionPaused = true;
+      setCameraStatus("The Netlify recognition function is not deployed at /api/identify. Use a Git-connected or CLI deploy, or search manually. No more frames will be sent.", true);
+      return;
+    }
+    if (error.status === 503 && [
+      "recognition_not_configured",
+      "recognition_configuration_invalid",
+      "provider_credentials_invalid",
+    ].includes(error.code)) {
       state.recognitionPaused = true;
       setCameraStatus(`${error.message} The camera stays on, but no more frames will be sent. Search manually or try again after the site configuration is fixed.`, true);
       return;
