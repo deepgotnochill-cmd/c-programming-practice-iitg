@@ -1,17 +1,24 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <limits.h>
 
 #define MAX_STUDENTS 100
 #define NAME_LENGTH 50
-#define SUBJECT_COUNT 3 
+#define SUBJECT_COUNT 3
+
 typedef struct {
     int id;
     char name[NAME_LENGTH];
     float grades[SUBJECT_COUNT];
 } Student;
 
-/* Function declarations */
 void showMenu(void);
+int readInt(const char *prompt, int *value);
+int readFloat(const char *prompt, float *value);
+int readName(const char *prompt, char name[], size_t size);
+int findStudentById(const Student students[], int count, int id);
 void addStudent(Student students[], int *count);
 void listStudents(const Student students[], int count);
 void searchStudent(const Student students[], int count);
@@ -24,13 +31,12 @@ int main(void) {
     int count = 0;
     int choice;
 
-    do {
+    for (;;) {
         showMenu();
-        printf("Choose an option: ");
 
-        if (scanf("%d", &choice) != 1) {
-            printf("Please enter a number.\n");
-            return 1;
+        if (!readInt("Choose an option: ", &choice)) {
+            printf("\nGoodbye!\n");
+            break;
         }
 
         switch (choice) {
@@ -48,11 +54,11 @@ int main(void) {
                 break;
             case 5:
                 printf("Goodbye!\n");
-                break;
+                return 0;
             default:
                 printf("Invalid choice. Try again.\n");
         }
-    } while (choice != 5);
+    }
 
     return 0;
 }
@@ -66,42 +72,144 @@ void showMenu(void) {
     printf("5. Exit\n");
 }
 
+/* Returns 1 on success, 0 on end-of-file or invalid input. */
+int readInt(const char *prompt, int *value) {
+    char line[128];
+    char *end;
+    long parsed;
+
+    printf("%s", prompt);
+    if (fgets(line, sizeof line, stdin) == NULL) {
+        return 0;
+    }
+
+    errno = 0;
+    parsed = strtol(line, &end, 10);
+
+    while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') {
+        end++;
+    }
+
+    if (end == line || *end != '\0' || errno == ERANGE ||
+        parsed < INT_MIN || parsed > INT_MAX) {
+        printf("Please enter a valid whole number.\n");
+        return 0;
+    }
+
+    *value = (int)parsed;
+    return 1;
+}
+
+/* Returns 1 on success, 0 on end-of-file or invalid input. */
+int readFloat(const char *prompt, float *value) {
+    char line[128];
+    char *end;
+    float parsed;
+
+    printf("%s", prompt);
+    if (fgets(line, sizeof line, stdin) == NULL) {
+        return 0;
+    }
+
+    errno = 0;
+    parsed = strtof(line, &end);
+
+    while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') {
+        end++;
+    }
+
+    if (end == line || *end != '\0' || errno == ERANGE) {
+        printf("Please enter a valid number.\n");
+        return 0;
+    }
+
+    *value = parsed;
+    return 1;
+}
+
+/* Reads a name that may contain spaces. */
+int readName(const char *prompt, char name[], size_t size) {
+    char line[256];
+    size_t length;
+
+    printf("%s", prompt);
+    if (fgets(line, sizeof line, stdin) == NULL) {
+        return 0;
+    }
+
+    length = strcspn(line, "\r\n");
+    line[length] = '\0';
+
+    if (length == 0 || length >= size) {
+        printf("Name must be between 1 and %zu characters.\n", size - 1);
+        return 0;
+    }
+
+    memcpy(name, line, length + 1);
+    return 1;
+}
+
+int findStudentById(const Student students[], int count, int id) {
+    for (int i = 0; i < count; i++) {
+        if (students[i].id == id) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
 void addStudent(Student students[], int *count) {
+    Student newStudent;
+
     if (*count >= MAX_STUDENTS) {
         printf("The student list is full.\n");
         return;
     }
 
-    Student newStudent;
+    for (;;) {
+        if (!readInt("Enter a positive student ID: ", &newStudent.id)) {
+            return;
+        }
 
-    printf("Enter student ID: ");
-    if (scanf("%d", &newStudent.id) != 1) {
-        printf("Invalid ID.\n");
-        return;
+        if (newStudent.id <= 0) {
+            printf("ID must be positive.\n");
+        } else if (findStudentById(students, *count, newStudent.id) >= 0) {
+            printf("That ID is already in use.\n");
+        } else {
+            break;
+        }
     }
 
-    /* TODO: Check whether this ID is already in use. */
-
-    printf("Enter student name (one word): ");
-    if (scanf("%49s", newStudent.name) != 1) {
-        printf("Could not read the name.\n");
+    if (!readName("Enter student name: ", newStudent.name,
+                  sizeof newStudent.name)) {
         return;
     }
 
     for (int i = 0; i < SUBJECT_COUNT; i++) {
-        printf("Enter grade for subject %d (0-100): ", i + 1);
+        for (;;) {
+            char prompt[80];
+            float grade;
 
-        if (scanf("%f", &newStudent.grades[i]) != 1) {
-            printf("Invalid grade.\n");
-            return;
+            snprintf(prompt, sizeof prompt,
+                     "Enter grade for subject %d (0-100): ", i + 1);
+
+            if (!readFloat(prompt, &grade)) {
+                return;
+            }
+
+            if (grade < 0.0f || grade > 100.0f) {
+                printf("Grade must be between 0 and 100.\n");
+                continue;
+            }
+
+            newStudent.grades[i] = grade;
+            break;
         }
-
-        /* TODO: Reject grades outside the 0-100 range. */
     }
 
     students[*count] = newStudent;
     (*count)++;
-
     printf("Student added.\n");
 }
 
@@ -112,7 +220,6 @@ void listStudents(const Student students[], int count) {
     }
 
     printf("\n--- Student List ---\n");
-
     for (int i = 0; i < count; i++) {
         printStudent(&students[i]);
     }
@@ -121,16 +228,16 @@ void listStudents(const Student students[], int count) {
 void searchStudent(const Student students[], int count) {
     int id;
 
-    printf("Enter the ID to search for: ");
-    if (scanf("%d", &id) != 1) {
-        printf("Invalid ID.\n");
+    if (!readInt("Enter the ID to search for: ", &id)) {
         return;
     }
 
-    /* TODO: Search the array for this ID. */
-    /* If found, call printStudent and return. */
-
-    printf("Student not found.\n");
+    int index = findStudentById(students, count, id);
+    if (index >= 0) {
+        printStudent(&students[index]);
+    } else {
+        printf("Student not found.\n");
+    }
 }
 
 float calculateAverage(const Student *student) {
@@ -149,8 +256,16 @@ void showTopStudent(const Student students[], int count) {
         return;
     }
 
-    /* TODO: Find the student with the highest average. */
-    /* Print that student using printStudent. */
+    int topIndex = 0;
+    for (int i = 1; i < count; i++) {
+        if (calculateAverage(&students[i]) >
+            calculateAverage(&students[topIndex])) {
+            topIndex = i;
+        }
+    }
+
+    printf("Top student:\n");
+    printStudent(&students[topIndex]);
 }
 
 void printStudent(const Student *student) {
