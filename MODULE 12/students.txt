@@ -1,0 +1,12 @@
+Deep Datta
+Chaudhury Tisha
+cd "c:\Users\iampo\C-Programming(IITG)\MODULE
+12\" ;
+if ($?)
+{ gcc
+STUDENT_RECORDS.c -o
+STUDENT_RECORDS }
+; if
+($?) {
+.\STUDENT_RECORDS }
+END end
